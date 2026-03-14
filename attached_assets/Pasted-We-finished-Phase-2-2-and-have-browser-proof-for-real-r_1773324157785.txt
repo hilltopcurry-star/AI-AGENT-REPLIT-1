@@ -1,0 +1,81 @@
+We finished Phase‑2.2 and have browser proof for real runner + SSE (jobId cmmnj6ztg0003cjcb5gj7eo3c, 66 [RUNNER] logs, event: done). Now implement Phase‑2.3: Deployment + Live URL (Replit‑first).
+
+Non‑negotiables:
+- Do NOT break Phase‑1 contract paths/routes/models.
+- Keep UI tabs ONLY: Chat / Console / Database.
+- Keep auth on /api/jobs/* (401 unauth, 404 wrong owner).
+- Never lie: no URL unless deployment actually succeeded.
+- No “Preview/Publish” tabs.
+
+Goal:
+After a REAL build completes (BUILD_RUNNER_MODE=real), deploy the generated workspace and return a live URL to the customer. Stream deploy logs into JobLog as `[DEPLOY] ...`. Save deployment status + URL in DB and show it in Database tab.
+
+Step A — Prisma schema additions (minimal)
+Add these Prisma models with relations + indexes:
+1) Deployment
+- id (cuid)
+- userId (FK -> User)
+- projectId (FK -> Project)
+- jobId (FK -> Job, UNIQUE)
+- provider (string, e.g. "replit")
+- status (enum/string: PENDING|DEPLOYING|SUCCESS|FAILED)
+- url (string nullable)
+- error (string nullable)
+- createdAt, updatedAt
+Indexes: userId, projectId, jobId(unique)
+
+2) BuildArtifact (optional but recommended)
+- id
+- jobId (unique FK -> Job)
+- workspacePath (string)
+- createdAt
+Index: jobId(unique)
+
+Run prisma generate + db push.
+
+Step B — Deployer implementation (Replit‑first, safe fallback)
+Create `apps/web/lib/deployer.ts`:
+- `deployWorkspace({ jobId, projectId, userId, workspacePath }): Promise<{ url: string }>`
+Must log to DB via JobLog `[DEPLOY] ...` steps.
+
+Deployment strategy:
+1) If Replit Deployments API/CLI is available in this environment, use it to deploy the built Next app from workspacePath and obtain a public URL.
+2) If NOT available, implement a truthful fallback:
+   - Start the built app in-process on an internal port (e.g. 7000 + hash(jobId))
+   - Expose it through the main app via a reverse proxy route:
+     - Add route: `apps/web/app/api/deployments/[deploymentId]/proxy/[...path]/route.ts`
+     - This proxies requests to the internal port for that deployment.
+   - The “live URL” becomes a URL under our main domain:
+     - `https://<main-domain>/api/deployments/<deploymentId>/proxy`
+   - MUST be isolated per user (auth check) and per deployment.
+If even this fallback cannot run reliably, mark FAILED and log reason.
+
+Step C — Hook into runner completion
+In `lib/job-runner.ts` (or the orchestration point), after build success:
+- create BuildArtifact row (workspacePath)
+- create Deployment row (PENDING -> DEPLOYING)
+- run deployWorkspace(), stream `[DEPLOY]` logs
+- update Deployment SUCCESS with url (or FAILED with error)
+- write final JobLog `[DEPLOY] Live URL: ...`
+- extend SSE done event data to include deploymentUrl when SUCCESS:
+  event: done
+  data: { type:"job_done", jobId, status, deploymentUrl? }
+
+Step D — Chat response
+When job completes successfully, assistant sends a final message containing the deployment URL (clickable). If failed, assistant explains failure and says no URL available.
+
+Step E — Database tab
+Add a Deployment section (read-only):
+- status, provider, url, createdAt
+- Link to open URL if exists.
+
+Proof required (auth-correct, from browser logged in):
+1) Set BUILD_RUNNER_MODE=real
+2) New project -> Build mode -> "Build it"
+3) Provide jobId + deploymentId
+4) Paste first ~20 lines from:
+   - /api/jobs/<jobId>/logs (must include [DEPLOY])
+   - /api/jobs/<jobId>/stream (must include done event with deploymentUrl if success)
+5) Provide the final live URL and confirm it loads and /api/health from deployed app returns {"ok":true}
+
+Stop on errors; paste full logs; apply minimal fix; continue.

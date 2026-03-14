@@ -1,0 +1,39 @@
+We are starting Phase‑2.1. Do NOT break Phase‑1 contract. Default must remain deterministic Mock Agent unless explicitly enabled via env flag.
+
+Goal
+Add a real LLM-backed agent behind a feature flag:
+
+AI_AGENT_MODE=mock (default) OR AI_AGENT_MODE=llm
+If AI_AGENT_MODE is missing, behave as mock (Phase‑1 behavior unchanged).
+Tasks (minimal implementation)
+Create apps/web/lib/agent/index.ts that exports a single function:
+processUserMessage({ userId, projectId, mode, message }): Promise<AgentResponse>
+It chooses implementation based on process.env.AI_AGENT_MODE.
+Keep existing apps/web/lib/mock-agent.ts unchanged and used when mode=mock.
+Add new file apps/web/lib/llm-agent.ts:
+For now, implement a safe stub (no external calls) if OPENAI_API_KEY missing:
+return deterministic message: “LLM mode enabled but OPENAI_API_KEY missing.”
+If OPENAI_API_KEY present, wire a minimal OpenAI client call (chat completions) BUT:
+Must follow Conversation Policy: Clarify → Plan → Confirm build.
+Must never claim files are created unless Job Runner actually runs (Phase‑2.2 later).
+Update the chat API route(s) to call processUserMessage from lib/agent/index.ts (single entry point).
+Do not change required routes/paths; just route internally.
+Add env documentation in docs/phase2.md or replit.md:
+AI_AGENT_MODE
+OPENAI_API_KEY (optional for now)
+Add a small health/debug field in /api/health response (non-breaking):
+keep { ok: true } but can add agentMode as extra field if safe.
+If any existing tests require exact JSON, then do NOT modify /api/health; instead add /api/agent-mode returning {mode: ...}.
+Non-negotiables
+Phase‑1 strict build gate still applies for Mock mode.
+No new UI tabs.
+No real build/deploy yet (that is Phase‑2.2/2.3).
+Auth and job security unchanged.
+Proof
+After changes:
+
+With no env set → app behaves exactly like Phase‑1 mock.
+With AI_AGENT_MODE=llm and no OPENAI_API_KEY → returns the stub warning message.
+Show which files changed/added and any errors fixed.
+Stop on errors and paste full logs.
+

@@ -1,0 +1,71 @@
+We are moving to Phase‑2 LLM integration. Do NOT break Phase‑1/Phase‑2.1/2.2/2.3 behavior. Keep UI tabs only Chat/Console/Database. Keep strict Build gate. Keep auth on all job/deploy endpoints.
+
+Step 0 — Ask user for secrets (values only)
+Check Secrets. If missing, ask me to paste:
+
+OPENAI_API_KEY Optional:
+OPENAI_MODEL (default "gpt-4o-mini" or similar)
+Never print the key back.
+
+Step 1 — Prisma: add Memory with 90‑day TTL
+Add model (minimal) to prisma/schema.prisma:
+
+MemoryItem
+id (cuid)
+userId (FK -> User)
+projectId (nullable FK -> Project)
+scope (string: "user"|"project")
+key (string)
+value (string/json text)
+createdAt
+expiresAt (DateTime) default = createdAt + 90 days (set in code) Indexes:
+@@index([userId, expiresAt])
+@@index([projectId, expiresAt])
+@@unique([userId, projectId, scope, key])
+Run prisma generate + db push.
+
+Step 2 — Memory manager (server-side)
+Create apps/web/lib/memory.ts with:
+
+getMemory({ userId, projectId }): Promise<Record<string,string>> (only non-expired)
+setMemory({ userId, projectId, scope, key, value, ttlDays=90 })
+cleanupExpiredMemory() (called opportunistically)
+Step 3 — Tool calling scaffolding (safe allowlist)
+Create apps/web/lib/tools/index.ts:
+
+Define Tool interface { name, description, inputSchema, run() }
+Start with 3 safe tools only (no shell):
+save_project_spec (updates Project.specJson with validation)
+set_memory (writes MemoryItem)
+create_build_job (calls existing build job creation; must still enforce Build gate: only triggered when mode=Build AND user explicitly confirmed; keep existing “Build it” gate OR require an explicit “confirmBuild=true” flag set by conversation manager) Tools must validate inputs and enforce userId scoping.
+Step 4 — LLM agent policy (no lies, 3-step flow)
+Update apps/web/lib/llm-agent.ts:
+
+Use OpenAI only when AI_AGENT_MODE=llm AND OPENAI_API_KEY present.
+System prompt must enforce:
+Clarify → Plan → Confirm build
+If user is non-technical or impatient, propose best-practice defaults.
+Never claim files/deploy unless JobRunner/Deployer actually ran.
+Integrate Memory:
+include relevant memory in context
+write new preferences via set_memory tool when user expresses stable preference (theme, stack, auth, etc.)
+Step 5 — UX: user should not need to type “Build it”
+Do NOT add new tabs. Minimal UI change allowed:
+
+In ChatPanel, when agent reaches “Confirm build” state, show a Confirm Build button.
+Clicking it sends a message "Build it" (still satisfying strict gate) OR sends {confirmBuild:true} while keeping the strict server check equivalent.
+Keep backward compatibility: user can still type “Build it”.
+Step 6 — Proof checklist
+Provide proof in browser (logged in):
+
+Set Secrets: OPENAI_API_KEY, set AI_AGENT_MODE=llm
+New project conversation:
+agent asks clarifying questions, creates plan
+memory is stored (verify via DB query endpoint or Database tab)
+Confirm build button appears; clicking triggers job creation ONLY after confirm
+Console streams [RUNNER] and [DEPLOY] as before (BUILD_RUNNER_MODE=real)
+Show:
+/api/agent-mode JSON includes llm mode + buildRunnerMode
+jobId, logs/stream snippets
+deployment URL works
+Stop on errors; minimal fixes only.

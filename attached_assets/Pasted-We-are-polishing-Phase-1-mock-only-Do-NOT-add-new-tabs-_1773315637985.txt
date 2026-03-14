@@ -1,0 +1,49 @@
+We are polishing Phase‑1 (mock-only). Do NOT add new tabs/features. Keep UI only: Chat / Console / Database. Do NOT add any real LLM calls. Keep deterministic mock-agent behavior and strict Build gate.
+
+Goals (Phase‑1 polish)
+Mock Agent UX (still deterministic)
+Keep: asks exactly 3 deterministic questions first, then deterministic Plan.
+Add: in Build mode AFTER plan is ready, the agent should send a deterministic guidance message:
+“If you want me to start the build simulation, type: Build it”
+Add: If user says things like “build”, “start building”, “go ahead” (but not exact Build it), respond deterministically:
+“To start, please type: Build it” (no job creation)
+Build gate strictness
+Job creation ONLY when:
+mode === "Build"
+message equals exactly "Build it" (case-insensitive OK)
+Decide trimming: do NOT auto-trim to avoid accidental triggers. "Build it " should NOT trigger.
+Ensure any other message does not create a Job.
+Console SSE reliability
+Ensure SSE stream never duplicates logs:
+Cursor must be (lastCreatedAt, lastId) ordering by createdAt asc then id asc.
+Add deterministic final SSE event when job completes:
+event: done with data { jobId, status }
+If client reconnects, it should resume from last cursor (Database-backed).
+Database tab polish
+Show /api/health JSON.
+Show project.specJson read-only (pretty JSON).
+Also show latest Job + JobLogs count (read-only) for current project (no extra tabs).
+Add an internal test page/route (no new tabs) Add a simple route ONLY under API for deterministic validation (protected by auth):
+GET /api/__tests__/phase1 It runs a quick set of server-side checks and returns JSON:
+required paths exist (best-effort)
+prisma models reachable
+mock-agent returns exactly 3 questions then plan
+build gate: "Build it" triggers job, "Build it " does not
+SSE endpoints exist Return { ok: true, results: [...] } with pass/fail.
+No UI for tests; API route only.
+
+Do not weaken security
+Keep auth on /api/jobs/[jobId]/logs and /stream:
+unauth -> 401
+wrong owner -> 404
+Do NOT make them public.
+After changes
+Restart dev server.
+Provide proof:
+/api/health JSON
+/api/tests/phase1 JSON
+Create new project → answer 3 questions → get plan → in Build mode type “build” (should instruct to type Build it) → then type “Build it” → job created → Console streams logs → show jobId.
+From browser (logged in) open:
+/api/jobs/<jobId>/logs (paste JSON)
+/api/jobs/<jobId>/stream (paste first ~20 SSE lines including [MOCK] and done event)
+Stop on any errors and show full logs. Minimal edits only.

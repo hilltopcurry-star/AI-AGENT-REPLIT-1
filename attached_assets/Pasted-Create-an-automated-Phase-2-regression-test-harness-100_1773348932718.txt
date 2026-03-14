@@ -1,0 +1,37 @@
+Create an automated Phase‑2 regression test harness (100 tests) without adding any new UI tabs/features.
+
+Goals
+Add server-side integration tests that can run from command line: npm run test:phase2
+Tests must cover:
+Auth rules: unauth => 401 for /api/jobs/* and /api/deployments/*, wrong-owner => 404
+Agent mode flags: /api/agent-mode returns expected fields
+LLM flow (AI_AGENT_MODE=llm): Clarify → Plan → Confirm button signal (showConfirmButton)
+Build gate strictness: only "Build it" in Build mode triggers job; near-miss does not; trailing space rejected
+Runner mode real: JobLogs include [RUNNER]
+Deploy: JobLogs include [DEPLOY] Live URL and deploymentId
+Proxy health: deploymentUrl + "/api/health" returns {"ok":true}
+Memory TTL: set_memory tool writes MemoryItem with expiresAt ~90 days; getMemory returns both user+project scope
+Constraints
+Do NOT weaken auth or add public debug endpoints.
+Tests may create a temporary test user/session programmatically ONLY inside test runner, not as a public endpoint.
+Do not change the app UI (still Chat/Console/Database only).
+Implementation
+Use a Node test runner (vitest or jest) in apps/web:
+Add dev dependency + npm run test:phase2
+Add a small internal helper for tests:
+createUser(), createProject(), createChat()
+createSessionCookie() compatible with Auth.js so tests can call API routes with a valid cookie
+Add 100 tests as grouped cases (not necessarily 100 separate files):
+20 auth tests
+20 build-gate tests
+20 LLM flow tests (mock OpenAI API via nock/msw so no real spend)
+20 runner/deploy pipeline tests (can be fewer full builds; the rest validate logs/state)
+20 memory tests (TTL, scope merge, expiry cleanup)
+Ensure OPENAI calls are mocked in tests (no real API calls).
+Print a clear PASS/FAIL summary.
+Proof
+After implementation:
+
+show npm run test:phase2 output summary (pass count)
+confirm no new routes/tabs were added and auth unchanged
+Stop on errors, show full logs, apply minimal fixes, continue.

@@ -1,0 +1,69 @@
+I need you to build my project in 3 clear phases. Please follow the instructions exactly as described below:
+
+Phase‑1 (Mock‑First)
+Build a mock-first AI workspace with the following features:
+
+Folder Structure:
+
+Next.js app must live under: apps/web/.
+Required path: apps/web/app/(dashboard)/projects/[id]/page.tsx.
+Prisma schema must be at: prisma/schema.prisma.
+Functionality:
+
+Agent Modes: Discuss, Plan, Build (mock).
+Build gate: Jobs created only in Build mode and when the user says "Build it".
+Logs: Console must stream real DB-backed JobLog rows via SSE.
+Tabs: Chat, Console, and Database (no Preview/Publish in Phase‑1).
+Deliverables:
+
+Provide a downloadable ZIP containing:
+apps/web/ (Next.js app).
+prisma/ (schema and migrations, if any).
+package.json, lockfile, and .env.example.
+Testing Before Delivery:
+
+Google OAuth must work.
+/api/health should return {"ok": true}.
+Build gate must be strict.
+Console must stream real DB logs.
+Once Phase‑1 is delivered, I will verify it and proceed to Phase‑2.
+
+Phase‑2 (AI Integration + Real Code Generation)
+After Phase‑1, I will ask you to add the following features:
+
+AI Integration:
+
+Use OpenAI or Anthropic for Discuss → Plan → Build workflows.
+AI should generate real files based on user prompts.
+File Generation:
+
+AI should create/edit files in a sandboxed workspace (e.g., /tmp/workspaces/<project-id>).
+Track changes using Git or file-based diffs.
+Build Runner:
+
+Implement isolated build runners (e.g., Docker containers).
+Run npm install, next build, and basic tests.
+Artifacts:
+
+Store generated files and build logs in the database.
+Phase‑3 (Deployments + Subscriptions)
+After Phase‑2, I will ask for deployment and payment integration:
+
+Deployment:
+
+Add deployment targets like Railway or Vercel.
+Automate deployments via API (set env vars, deploy builds).
+Subscriptions:
+
+Integrate Stripe for paid plans (e.g., $20/mo, $100/mo).
+Enforce limits based on subscriptions (e.g., concurrent builds, projects).
+Multi-Tenant Scaling:
+
+Ensure each user/project is isolated.
+Add role-based permissions and team management.
+Instructions:
+For now, focus ONLY on Phase‑1. Deliver the ZIP file for Phase‑1, and I will verify it before moving to the next phase.
+
+What to Do Next:
+Send this message to Replit.
+Once they respond or deliver Phase‑1, share the ZIP or their response with me.

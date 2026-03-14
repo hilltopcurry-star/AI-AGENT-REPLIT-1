@@ -1,0 +1,57 @@
+Listen carefully. Your “Build” output is still not acceptable as an agent/workspace product and it violates the Phase‑1 requirements in multiple ways.
+
+1) Console logs are not real / not DB-backed
+The build output is clearly scripted (“Created: app/layout.tsx…”, “PASS tests…”, “127 modules transformed…”) and not proven to come from the database.
+
+Phase‑1 requirement: Console must stream real `JobLog` rows from the DB via SSE.
+
+I need proof that:
+
+A Job row is created
+Multiple JobLog rows are inserted (each line = a DB row)
+The Console is showing logs by reading from DB (SSE/poll), not printing fake text
+Deliverable (mandatory)
+Screenshot of DB tables showing the Job and corresponding JobLog rows for this build (jobId + timestamps)
+Code pointer to the SSE route: /api/jobs/[jobId]/stream that queries JobLog and streams only new rows
+2) “No .env.local file found, using defaults” is a critical production bug
+This is unacceptable. NextAuth (Google) + Stripe + Prisma must use process.env (Replit Secrets), not “defaults”.
+
+Fix required:
+
+Remove .env.local dependency and remove “using defaults”
+Do not provide fallback default values for auth/billing
+If env vars are missing, fail loudly with a clear error (so misconfig is caught)
+3) Port handling is wrong / risky
+Your log says: “Starting server on port 5000…”. On Replit the port must be $PORT.
+
+Hardcoding 5000 will break reachability and cause “couldn’t reach this app”.
+
+Fix required:
+
+Always listen on process.env.PORT
+Bind host 0.0.0.0
+Replit run command must be:
+next dev -H 0.0.0.0 -p $PORT (dev) OR
+next build && next start -H 0.0.0.0 -p $PORT (prod)
+4) Strict Build gate must be enforced
+Confirm in code that a Job is created ONLY when:
+
+mode === “Build”
+message content equals exactly “Build it” (case-insensitive OK)
+No other message should start a build or create job logs.
+
+Acceptance criteria (non-negotiable)
+1) Public URL stays reachable during and after build
+
+2) /api/health returns 200
+
+3) Google sign-in works end-to-end
+
+4) Build logs visible in Console are provably DB-backed (Job + JobLog + SSE stream)
+
+5) No OpenAI/real LLM in Phase‑1
+
+6) Phase‑1 UI = only Chat / Console / Database
+
+Do not mark this complete until you provide the DB proof + SSE proof + port fix.
+

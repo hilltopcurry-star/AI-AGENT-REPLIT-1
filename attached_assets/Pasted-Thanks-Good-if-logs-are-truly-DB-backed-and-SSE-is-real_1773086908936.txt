@@ -1,0 +1,63 @@
+Thanks. Good—if logs are truly DB-backed and SSE is real, then we can verify it objectively. Please provide concrete proof via URLs + screenshots, not narrative.
+
+1) Provide verifiable proof (must)
+A) Job + JobLog proof via API (no DB console “trust me”)
+Add or expose endpoints (read-only) and send me working URLs:
+
+GET /api/jobs/latest?projectId=<id>
+Returns latest job id, status, createdAt.
+
+GET /api/jobs/<jobId>/verify
+Must return JSON like:
+
+json
+Copy
+{
+  "job": { "id": "...", "projectId": "...", "status": "...", "createdAt": "..." },
+  "logCount": 28,
+  "firstLog": { "id": "...", "message": "...", "createdAt": "..." },
+  "lastLog": { "id": "...", "message": "...", "createdAt": "..." }
+}
+SSE endpoint must be reachable in browser:
+GET /api/jobs/<jobId>/logs
+
+It should stream data: events containing real JobLog rows.
+
+Deliverable: send me the exact URLs for (1)(2)(3) and I will test them.
+
+B) UI proof
+Send screenshots showing:
+
+After sending Build it in Build mode → a new jobId is created
+Console connects to /api/jobs/<jobId>/logs and streams logs
+Database tab shows /api/health = ok and specJson readonly
+2) Port handling — fix to be correct, not “default”
+Your workflow command npx next dev -p 5000 --hostname 0.0.0.0 is fragile. On Replit the correct approach is to bind to $PORT.
+
+Required change:
+
+Use:
+
+next dev -H 0.0.0.0 -p $PORT
+(or next start -H 0.0.0.0 -p $PORT for prod)
+
+Deliverable: update workflow/run command and confirm the app stays reachable during builds.
+
+3) OAuth proof (not assumptions)
+You claim Google OAuth is fixed. Please provide:
+
+GET /api/auth/providers output (screenshot is fine)
+Confirm NEXTAUTH_URL exactly equals the public domain you gave
+Confirm Google Console redirect URI exactly:
+https://<domain>/api/auth/callback/google
+
+Also: remove any misleading “deploy to Vercel/live URL” claims from the agent.
+
+4) Confirm strict gate in behavior (not only code)
+Please confirm with a quick demo:
+
+In Build mode, message “Hello” → NO job created
+In Plan mode, message “Build it” → NO job created
+Only Build mode + “Build it” → job created + logs
+Once you provide the URLs + screenshots above, I’ll accept the pipeline as compliant.
+

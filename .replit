@@ -1,0 +1,132 @@
+modules = ["nodejs-20", "web", "postgresql-16"]
+run = "npm run dev"
+hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
+
+[nix]
+channel = "stable-24_05"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 5001
+externalPort = 3001
+
+[[ports]]
+localPort = 5002
+externalPort = 3002
+
+[[ports]]
+localPort = 5050
+externalPort = 9000
+
+[[ports]]
+localPort = 7231
+externalPort = 8081
+
+[[ports]]
+localPort = 7334
+externalPort = 8099
+
+[[ports]]
+localPort = 7389
+externalPort = 8000
+
+[[ports]]
+localPort = 7587
+externalPort = 6000
+
+[[ports]]
+localPort = 7608
+externalPort = 4200
+
+[[ports]]
+localPort = 7634
+externalPort = 5000
+
+[[ports]]
+localPort = 7657
+externalPort = 8008
+
+[[ports]]
+localPort = 7751
+externalPort = 6800
+
+[[ports]]
+localPort = 7868
+externalPort = 3003
+
+[[ports]]
+localPort = 7890
+externalPort = 5173
+
+[[ports]]
+localPort = 7991
+externalPort = 8080
+
+[[ports]]
+localPort = 24678
+externalPort = 3000
+
+[env]
+PORT = "5000"
+
+[deployment]
+deploymentTarget = "autoscale"
+run = ["npm", "run", "start"]
+build = ["npm", "run", "build"]
+publicDir = "dist/public"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Build Worker"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd apps/web && HOSTNAME=0.0.0.0 npx next dev -p 5000"
+waitForPort = 5000
+
+[[workflows.workflow]]
+name = "Build Worker"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "export PATH=/home/runner/.fly/bin:$PATH && cd apps/web && WORKER_ID=worker-replit-1 npx tsx worker/index.ts"
+
+[agent]
+integrations = ["javascript_openai_ai_integrations:2.0.0", "javascript_log_in_with_replit:2.0.0"]
+
+[userenv]
+
+[userenv.shared]
+NEXTAUTH_SECRET = "jClgKnblqOIQ0elE3gHEt+19UDUhZhwGzf4AP0T0sts="
+NEXTAUTH_URL = "https://1020fb4a-7dad-42fd-821c-0d41a03ca5c9-00-qexofs9ql0lx.riker.replit.dev"
+BUILD_RUNNER_MODE = "real"
+AI_AGENT_MODE = "llm"
+OPENAI_MODEL = "gpt-4o-mini"
+ADMIN_EMAILS = "alimarribaloch@gmail.com,grillsngravyhn@gmail.com,hilltopcurry@gmail.com"
+FLY_REGION = "iad"

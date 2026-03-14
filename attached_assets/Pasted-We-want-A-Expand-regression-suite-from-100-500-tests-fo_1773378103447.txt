@@ -1,0 +1,84 @@
+We want:
+A) Expand regression suite from 100 → 500 tests (focus runner/deploy/proxy/auth).
+B) Hardening #1: automatic cleanup of /tmp/workspaces AND deployed child processes (TTL).
+C) Hardening #3: OpenAI cost controls + kill switch.
+
+Non-negotiables:
+- Do NOT add new UI tabs (still Chat/Console/Database only).
+- Do NOT weaken auth; keep 401 unauth and 404 wrong-owner behavior.
+- Do NOT make backup/public routes.
+- Keep Phase-1 strict build gate.
+
+========================================================
+A) 500 TESTS (runner/deploy/proxy/auth)
+========================================================
+1) Keep existing vitest harness + tests/run.sh.
+2) Add 400 more tests mainly by parameterizing cases (don’t create 400 full deployments; minimize expensive runs).
+3) Structure (suggested totals):
+   - Auth/Session: 120 tests
+   - Runner pipeline: 120 tests
+   - Deploy/proxy: 160 tests
+   - SSE correctness (cursor, done event, dedupe): 60 tests
+   - Misc regressions (bad JSON, mode mismatch, ownership edges): 40 tests
+Total = 500.
+
+4) Rules to keep tests stable:
+   - Only run at most 5 real build+deploy jobs; reuse their jobIds/deploymentIds for additional assertions.
+   - Mock OpenAI in all tests unless a test explicitly checks kill-switch behavior (still no real external calls).
+   - Ensure tests are deterministic and do not rely on old deployments being alive unless explicitly relaunched.
+5) Update `tests/run.sh` to run the suite and print final “500 passed” summary.
+
+Deliverable proof:
+- Output of tests/run.sh showing 500/500 pass.
+- Duration stats.
+
+========================================================
+B) HARDENING #1: WORKSPACE + PROCESS CLEANUP (TTL)
+========================================================
+Implement cleanup that runs safely without cron:
+1) Add env vars:
+   - WORKSPACE_TTL_HOURS (default 24)
+   - MAX_WORKSPACES_PER_USER (default 20)
+   - MAX_ACTIVE_DEPLOYMENTS_PER_USER (default 5)
+2) Create `apps/web/lib/cleanup.ts` with:
+   - `cleanupWorkspaces()`:
+     - delete /tmp/workspaces/<jobId> for jobs older than TTL OR beyond per-user cap
+     - do not delete if job status RUNNING
+   - `cleanupDeployments()`:
+     - stop/kill child processes for deployments older than TTL or beyond cap
+     - mark deployment status as EXPIRED (new status) OR keep SUCCESS but set processRunning=false
+   - safe delete: never allow path traversal, only under /tmp/workspaces
+3) Call cleanup opportunistically:
+   - at the start of createBuildJob
+   - and at start of proxy request handler (lightweight, but rate-limited)
+4) Add logs as JobLog only when relevant; otherwise keep server logs.
+
+========================================================
+C) HARDENING #3: OPENAI COST CONTROLS + KILL SWITCH
+========================================================
+1) Add env vars:
+   - OPENAI_KILL_SWITCH=1|0 (default 0)
+   - OPENAI_MAX_TOKENS_PER_REQUEST (default 800)
+   - OPENAI_MAX_REQUESTS_PER_DAY_PER_USER (default 50)
+   - OPENAI_MAX_TOKENS_PER_DAY_PER_USER (default 20000)
+2) Add Prisma model `OpenAiUsage`:
+   - id, userId, date (YYYY-MM-DD), requests, tokens, createdAt, updatedAt
+   - @@unique([userId, date]), @@index([userId, date])
+3) In llm-agent.ts before any OpenAI call:
+   - if kill switch enabled -> return deterministic message: “LLM temporarily disabled.”
+   - enforce per-request token cap
+   - enforce daily caps based on OpenAiUsage; if exceeded -> return deterministic message telling user to try later
+   - increment usage after each successful call using returned token usage from OpenAI response
+4) All of this must be server-side; never expose key; no UI changes needed.
+
+========================================================
+After implementation (proof checklist)
+========================================================
+1) Run tests/run.sh and show final summary: 500 passed.
+2) Show /api/agent-mode still works.
+3) Verify cleanup does not break running deployments:
+   - create a deployment, access proxy, then force cleanup run; proxy should still work for active deployment
+4) Verify kill switch:
+   - set OPENAI_KILL_SWITCH=1 and show LLM returns “LLM temporarily disabled.” and no OpenAI call is made.
+
+Stop on errors and paste full logs. Minimal changes, keep everything backward compatible.

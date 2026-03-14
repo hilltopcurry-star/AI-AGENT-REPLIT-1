@@ -1,0 +1,41 @@
+We have a production/live URL where: /api/jobs/test-job-2/logs and /api/jobs/test-job-2/stream return {"error":"Not found"}. This means the deployed app does not have the required routes at the required paths.
+
+Goal: Make routes work EXACTLY per contract:
+
+apps/web/app/api/jobs/[jobId]/logs/route.ts
+apps/web/app/api/jobs/[jobId]/stream/route.ts (SSE)
+Also ensure any existing [id] routes remain OK, but contract paths must exist.
+
+1) Inspect current routes and fix param mismatch
+Check if routes exist under app/api/jobs/[id]/... instead of [jobId].
+If so, create alias wrappers under [jobId] that re-export/call the same handlers (minimal, no duplication).
+2) Implement /logs route (DB-backed)
+GET /api/jobs/:jobId/logs must return JobLog rows from Prisma for that jobId (ordered by createdAt asc, id asc). Response JSON should include at least: { ok: true, jobId, logs: [...] } or existing app format, but must not 404.
+
+3) Implement /stream SSE route (cursor polling)
+GET /api/jobs/:jobId/stream must:
+
+set headers for SSE: Content-Type: text/event-stream, Cache-Control: no-cache, Connection: keep-alive
+stream logs from DB using cursor-based polling:
+client provides optional query params: lastCreatedAt, lastId
+server repeatedly queries for new JobLog where:
+jobId matches
+(createdAt > lastCreatedAt) OR (createdAt == lastCreatedAt AND id > lastId)
+emit events like:
+data: <json>\n\n where json contains { id, createdAt, line }
+stop when job status is COMPLETED/FAILED and no new logs remain.
+All lines must remain [MOCK] prefixed (already in DB).
+4) IMPORTANT: Contract requires /api/projects/[id]/chat too
+Verify apps/web/app/api/projects/[id]/chat/route.ts exists and triggers Job creation only when:
+
+mode === "Build"
+message equals "Build it" (case-insensitive) No real LLM calls.
+5) After fix, provide proof by printing working URLs
+In the codebase, add a temporary server-side console log or a simple debug endpoint if needed, but minimal. Then restart dev server. Finally, verify in browser:
+
+/api/health returns {"ok":true}
+find the latest real jobId from DB (Prisma) and output it
+open:
+/api/jobs/<realJobId>/logs (must return JSON logs)
+/api/jobs/<realJobId>/stream (must stream SSE; show a few lines)
+Do not add new UI tabs/features. Keep Chat/Console/Database only. No OpenAI/LLM.

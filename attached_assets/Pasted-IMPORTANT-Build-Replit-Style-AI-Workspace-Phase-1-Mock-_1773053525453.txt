@@ -1,0 +1,87 @@
+IMPORTANT: Build Replit-Style AI Workspace (Phase-1 Mock-First)
+
+Please implement the following plan exactly. Do not use real OpenAI/LLM for Phase 1. Use a deterministic Mock Agent.
+
+1. Folder Structure
+
+prisma/schema.prisma: Multi-tenant schema with JobLog and Release.
+
+apps/web/app/(dashboard)/projects/[id]/page.tsx: Workspace UI with Mode Selector.
+
+apps/web/components/workspace/: ChatPanel, ConsolePanel (Live Logs), and DatabasePanel (Health check).
+
+apps/web/lib/mock-agent.ts: Logic for deterministic responses (No OpenAI).
+
+2. Prisma Schema (Core Entities)
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  projects      Project[]
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  specJson    Json?
+  chats       Chat[]
+  jobs        Job[]
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  mode      String   @default("Discuss")
+  content   String
+  chatId    String
+}
+
+model Job {
+  id        String   @id @default(cuid())
+  status    String   @default("PENDING")
+  logs      JobLog[]
+}
+
+model JobLog {
+  id        String   @id @default(cuid())
+  jobId     String
+  job       Job      @relation(fields: [jobId], references: [id])
+  level     String
+  message   String
+  createdAt DateTime @default(now())
+}
+
+3. Workspace Layout & Phase-1 Scope
+
+Mode Selector:
+Manual selection in UI (Discuss / Plan / Build / Improve / Debug).  
+System does not auto-detect.
+
+Build Execution Gate:
+A Job is created ONLY if mode === "Build" AND user says "Build it".
+
+Mock Agent:
+Asks 3 questions → Proposes Plan → On "Build it", generates realistic JobLogs in DB.
+
+Database Tab:
+Shows /api/health status and project specJson (read-only).
+
+Console Tab:
+Streams/polls JobLog table via SSE.
+
+Auth / Stripe:
+Google Login and Stripe (Test Mode) must be functional.
+
+4. Environment Variables
+
+Create the following environment variables (values will be provided later in Replit Secrets):
+
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
+NEXTAUTH_SECRET=
+NEXTAUTH_URL=
+
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_PRICE_ID_PRO=

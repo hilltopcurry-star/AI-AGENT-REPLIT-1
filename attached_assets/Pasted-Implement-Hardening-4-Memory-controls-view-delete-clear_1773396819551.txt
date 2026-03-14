@@ -1,0 +1,54 @@
+Implement Hardening #4: Memory controls (view/delete/clear) for the new MemoryItem system.
+
+Constraints:
+- No new UI tabs (still Chat/Console/Database only).
+- Memory must remain user-scoped (never leak across users).
+- Keep TTL behavior (90 days).
+- No public endpoints; all must require NextAuth session.
+- Minimal UI additions inside the existing Database tab only.
+
+Backend:
+1) Add API routes (auth-protected):
+- GET  /api/memory
+  - returns all non-expired MemoryItem rows for current user (both user-scope and project-scope)
+  - support query params:
+    - scope=user|project|all (default all)
+    - projectId=<id> optional
+- DELETE /api/memory?id=<memoryId>
+  - deletes a single MemoryItem owned by session user
+- POST /api/memory/clear
+  - body: { scope: "user"|"project"|"all", projectId?: string }
+  - deletes matching memory rows for that user (and project if provided)
+Return JSON: { ok:true, deleted:<n> }
+
+2) Add a safe "cleanup expired memory" endpoint (auth-protected) OPTIONAL:
+- POST /api/memory/cleanup
+  - deletes expired rows for that user (or globally if admin only). If not needed, skip.
+
+Frontend (DatabasePanel only):
+3) Add a "Memory" section:
+- Shows a table/list:
+  - scope, key, value (truncated + expandable), projectId (if any), expiresAt
+- Buttons:
+  - Delete (per row)
+  - Clear User Memory
+  - Clear This Project Memory (when projectId exists)
+  - Clear All Memory
+- Confirm dialog for clear actions.
+- After actions, refetch list.
+
+Security & UX:
+- Never show memory belonging to other users.
+- Truncate value to e.g. 200 chars with “Show more”.
+- Handle 401 by showing “Please sign in”.
+
+Proof required:
+- In browser (logged in), open Database tab:
+  - confirm memory list loads (even if empty)
+- Create some memory via conversation (LLM set_memory tool)
+- Show memory appears in Database tab
+- Delete one item and show it disappears
+- Clear project memory and show count deleted
+- Clear all memory and show empty list
+
+Stop on errors; minimal changes only.

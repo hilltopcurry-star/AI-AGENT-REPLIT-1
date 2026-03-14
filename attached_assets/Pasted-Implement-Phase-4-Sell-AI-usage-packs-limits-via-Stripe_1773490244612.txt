@@ -1,0 +1,68 @@
+Implement Phase‑4: Sell AI usage packs/limits via Stripe and show them clearly in UI.
+
+Non‑negotiables:
+- Never confuse AI quota with build credits.
+- When AI quota is exhausted: chat must continue in Basic Mode (no LLM), not stop.
+- Build credits and AI quota are independent.
+
+A) Prisma models (minimal)
+Add:
+1) AiQuotaLedger
+- id, userId, amountRequests(Int), amountTokens(Int), reason, source(stripe|promo|mock), createdAt
+- @@index([userId, createdAt])
+
+2) AiQuotaBalance (cached)
+- userId unique
+- remainingRequests Int
+- remainingTokens Int
+- updatedAt
+
+3) StripePurchase (optional but helpful)
+- id, userId, kind("build_credits"|"ai_quota"), stripeSessionId unique, status, amount, createdAt
+
+B) Server lib
+Create `apps/web/lib/ai-quota.ts`:
+- getAiQuota(userId)
+- addAiQuota(userId, addRequests, addTokens, reason, source)
+- requireAiQuota(userId, reqCost, tokenCost)
+- deductAiQuotaAtomic(userId, reqCost, tokenCost) // transactional
+- If quota insufficient: throw typed error code "AI_QUOTA_EXHAUSTED"
+
+C) LLM call enforcement
+In llm-agent.ts BEFORE calling OpenAI:
+- If OPENAI_KILL_SWITCH=1 -> fallback to Basic Mode message
+- Else call requireAiQuota + deductAiQuotaAtomic
+- If exhausted -> return fallback Basic Mode reply:
+  “AI quota finished. You can continue in Basic Mode or buy AI quota from Billing.”
+Include CTA link /billing and do not repeat message spam (60s cooldown).
+
+D) Billing page UI (/billing)
+Add two sections:
+1) Build Credits packs (already exist)
+2) AI Quota packs:
+   - Example packages (configurable):
+     - $10 → +50 requests + 50k tokens
+     - $20 → +120 requests + 150k tokens
+     - $100 → +1000 requests + 1.5M tokens
+Show current remainingRequests/remainingTokens clearly.
+
+E) Stripe integration
+If STRIPE_SECRET_KEY + webhook secret available:
+- Create checkout sessions for BOTH pack types
+- On webhook success: addCredits() OR addAiQuota() accordingly
+If Stripe env missing:
+- Provide DEV-only mock purchase buttons (auth-protected) for both pack types.
+
+F) Header indicators (global)
+Show two badges:
+- “Build Credits: X”
+- “AI Quota: R req / T tok”
+With warning colors when low, and “Add” button linking to /billing.
+
+G) Proof (browser)
+- Show billing page with both pack types visible
+- Buy mock AI quota pack -> balances update + ledger entry
+- Exhaust AI quota -> LLM falls back to Basic Mode but chat continues
+- Build still works if build credits available
+
+Stop on errors. Minimal changes. Keep existing tests passing (update tests only if needed).

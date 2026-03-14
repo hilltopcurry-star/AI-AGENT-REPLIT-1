@@ -1,0 +1,59 @@
+1) Fix required component filenames (keep compatibility)
+Replit Shell me run:
+
+bash
+
+cd apps/web
+
+# show current
+ls -lah components/workspace
+
+# if lowercase exist, rename to PascalCase
+[ -f components/workspace/chat-panel.tsx ] && mv components/workspace/chat-panel.tsx components/workspace/ChatPanel.tsx || true
+[ -f components/workspace/console-panel.tsx ] && mv components/workspace/console-panel.tsx components/workspace/ConsolePanel.tsx || true
+[ -f components/workspace/database-panel.tsx ] && mv components/workspace/database-panel.tsx components/workspace/DatabasePanel.tsx || true
+
+# verify required exact paths exist
+ls -lah components/workspace/ChatPanel.tsx components/workspace/ConsolePanel.tsx components/workspace/DatabasePanel.tsx
+Agar imports lowercase paths use kar rahe hain to unko update karna hoga. Ye grep run karo aur output paste karo:
+
+bash
+
+rg -n "chat-panel|console-panel|database-panel" apps/web | head -n 200
+(jo files match hon, unme import paths ./ChatPanel etc kar dena—agar chaho to main exact edits dunga; aap pehle grep output paste kar do.)
+
+2) Now do remaining verification (proof required)
+A) Build mode → “Build it” → Job created
+App open karo:
+
+Project create/open
+Mode = Build
+Message exactly: Build it
+Job create hotay hi jobId note karo (UI ya API response se).
+
+B) Proof commands (run + paste)
+Replace <jobId>:
+
+bash
+
+curl -sS http://localhost:5000/api/health && echo
+
+curl -sS "http://localhost:5000/api/jobs/<jobId>/logs" | head -c 4000 && echo
+
+# SSE proof (stop with Ctrl+C after a few lines)
+curl -N "http://localhost:5000/api/jobs/<jobId>/stream" | head -n 40
+Mujhe paste karo:
+
+Running Replit URL
+/api/health JSON
+jobId
+/logs output
+/stream 10–40 lines (must show [MOCK] logs streaming)
+3) Google login (only if you want to prove it now)
+Google Console me Authorized redirect URI add karo:
+
+https://<your-replit-domain>/api/auth/callback/google
+Aur verify:
+
+Sign in works
+callback doesn’t error

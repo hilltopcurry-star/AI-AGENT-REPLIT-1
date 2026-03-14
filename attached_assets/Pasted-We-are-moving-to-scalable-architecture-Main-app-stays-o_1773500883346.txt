@@ -1,0 +1,104 @@
+We are moving to scalable architecture:
+- Main app stays on Railway+Neon.
+- Generated apps deploy to Fly.io using Docker.
+- We must add queue + worker to handle high scale (30k+ subscribers) safely.
+
+Implement Phase‑Scale‑1 (minimal but correct foundation). Do NOT add new workspace tabs. Admin dashboard can be a separate /admin page.
+
+A) DB / Prisma changes
+Add models (minimal):
+1) BuildQueueJob
+- id (cuid)
+- userId (FK)
+- projectId (FK)
+- status (QUEUED|RUNNING|SUCCESS|FAILED|CANCELLED)
+- priority Int default 0
+- attempts Int default 0
+- maxAttempts Int default 3
+- lockedAt DateTime?  // for worker lock
+- lockedBy String?    // worker id
+- availableAt DateTime default now
+- createdAt, updatedAt
+Indexes:
+- @@index([status, priority, availableAt, createdAt])
+- @@index([userId, createdAt])
+
+2) BuildArtifact
+- id
+- projectId, userId, jobId (unique FK -> Job)
+- type ("source_tar"|"docker_context"|"docker_image_ref")
+- pathOrRef String
+- createdAt
+Indexes: userId, projectId
+
+3) FlyDeployment
+- id
+- userId, projectId
+- queueJobId (unique)
+- status (PENDING|DEPLOYING|SUCCESS|FAILED)
+- appName String?
+- url String?
+- error String?
+- createdAt, updatedAt
+Indexes: userId, projectId
+
+Run prisma generate + db push.
+
+B) Queue behavior (main app)
+When user confirms build:
+- Instead of immediately running npm install/build in the web process, create:
+  - Job row (as today) OR keep current Job as “logical job”
+  - BuildQueueJob row (QUEUED)
+- Console should stream logs, but now logs come from worker updates.
+
+Add endpoints:
+1) POST /api/queue/build (auth) body: { projectId }
+- creates BuildQueueJob, returns {queueJobId}
+2) GET /api/queue/status?projectId=...
+- returns latest queue job status + position estimate (count jobs ahead)
+3) SSE: /api/queue/[queueJobId]/stream
+- streams JobLog updates (reuse existing SSE infra)
+
+C) Worker (separate script, still inside repo)
+Create `apps/web/worker/index.ts` (or /worker folder) that:
+- polls DB for QUEUED jobs
+- atomically locks one job using transaction:
+  - update where status=QUEUED and (lockedAt null) and availableAt <= now
+  - set status=RUNNING, lockedAt, lockedBy
+- runs build pipeline in /tmp/workspaces/<queueJobId> (reuse job-runner functions but refactor to accept queueJobId)
+- writes JobLogs to DB continuously
+- on success -> status=SUCCESS; on failure -> FAILED and error
+
+Make it runnable:
+- `npm run worker` (in apps/web) with WORKER_ID env.
+
+D) Fly.io deploy stub (no real deploy yet if credentials missing)
+Create `apps/web/lib/fly-deployer.ts`:
+- if FLY_API_TOKEN missing -> log `[DEPLOY] Fly deploy skipped (no token)` and mark FlyDeployment FAILED with reason
+- if token exists -> (Phase‑Scale‑2 will implement real API calls)
+For now implement only:
+- Docker context artifact creation:
+  - generate Dockerfile + package.json into workspace
+  - tar the docker context and store as artifact type "docker_context"
+- Save FlyDeployment row with status PENDING/FAILED.
+
+E) Admin / Owner dashboard (very minimal)
+Create `/admin` page (admin email allowlist env ADMIN_EMAILS) showing:
+- total users
+- active subscriptions count (if Stripe exists)
+- credits sold
+- AI quota sold
+- queue depth (queued/running/failed)
+- latest 20 queue jobs
+
+F) Limits (important for scale)
+- Add global concurrency limit for worker: MAX_CONCURRENT_BUILDS_PER_WORKER=2
+- Add per-user limit: 1 running build at a time (queue the rest)
+
+Proof required:
+1) Create a build -> shows QUEUED then RUNNING then SUCCESS (using worker)
+2) Console shows streamed logs from worker
+3) /admin shows queue depth and recent jobs
+4) If FLY_API_TOKEN missing: deployment marked FAILED with clear message (no lying)
+
+Stop on errors, minimal changes, keep existing billing/quota/rate-limit intact.

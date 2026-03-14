@@ -1,0 +1,58 @@
+We are implementing Phase‑2.2: real sandboxed build runner. Do NOT break Phase‑1 contract. Keep UI tabs Chat/Console/Database only. Keep mock agent default. No deploy yet.
+
+Goal
+When a Job is created (still only via strict gate: Build mode + exact “Build it”), the backend should:
+
+create a per-job workspace dir: /tmp/workspaces/<jobId>/
+generate a minimal real Next.js app (or scaffold) into that dir based on project.specJson (basic pages + api/health)
+run real commands with timeouts:
+npm install
+npm run build
+stream logs into DB as JobLog rows (prefix clearly [RUNNER] to distinguish from [MOCK])
+SSE Console must show these real logs as they are written
+Job ends COMPLETED/FAILED with final event: done
+Constraints (security)
+Do NOT execute user-provided shell strings.
+Only run a fixed allowlist of commands.
+Sanitize paths; never allow ...
+Hard kill after 10 minutes total. Per command: install 5 min, build 5 min.
+Store no secrets in workspace files.
+Implementation steps
+A) Add apps/web/lib/job-runner.ts
+
+function runJob({ jobId, projectId, userId })
+creates workspace dir
+writes a deterministic scaffold:
+package.json, next.config, tsconfig
+app/api/health/route.ts returning {ok:true}
+app/page.tsx basic page
+Use Node child_process spawn with args array (no shell=true)
+Stream stdout/stderr lines into JobLog with createdAt ordering; prefix [RUNNER]
+On error: mark job FAILED and log [RUNNER] ERROR: ...
+On success: mark job COMPLETED
+B) Trigger runner
+
+In the existing build-trigger path (where Job is created), start runner asynchronously:
+fire-and-forget (void runJob(...)) OR background queue table if already exists.
+Ensure the API returns quickly and UI can immediately open Console.
+C) Keep Phase‑1 mock simulation available
+
+Add env flag: BUILD_RUNNER_MODE=mock|real default mock.
+If BUILD_RUNNER_MODE=mock, keep current [MOCK] logs behavior unchanged.
+If BUILD_RUNNER_MODE=real, use real runner logs [RUNNER].
+D) Database tab enhancement (read-only)
+
+Show runner mode and latest workspace path (for debugging, safe).
+Proof required
+With default env (mock): behavior unchanged.
+Set BUILD_RUNNER_MODE=real and run a new project build:
+Build mode → “Build it” creates job
+Console shows [RUNNER] logs from npm install + npm run build
+Job ends with event: done and status COMPLETED (or FAILED with error logged)
+Show the jobId and paste:
+first 20 logs from /api/jobs/<jobId>/logs
+first ~20 SSE lines from /api/jobs/<jobId>/stream
+Stop on any failure, paste full error, apply minimal fix, continue.
+
+No deploy step in this phase.
+

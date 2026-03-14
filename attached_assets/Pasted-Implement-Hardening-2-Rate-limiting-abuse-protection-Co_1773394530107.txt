@@ -1,0 +1,63 @@
+Implement Hardening #2: Rate limiting / abuse protection.
+
+Constraints:
+- Do NOT add new UI tabs (still Chat/Console/Database).
+- Do NOT weaken auth.
+- Do NOT block normal browsing; only protect write/heavy endpoints.
+- Must be multi-tenant safe: keyed by userId (preferred) and fallback to IP for unauth endpoints.
+- No external services (no Upstash/Redis). Use Postgres via Prisma.
+
+Targets to rate-limit:
+1) POST /api/projects/[id]/chat  (LLM + job creation)
+2) POST /api/chats/[id]/messages (if still used)
+3) GET /api/jobs/[jobId]/stream  (SSE) — limit concurrent streams per user
+4) GET /api/deployments/[deploymentId]/proxy/* — limit requests per minute per user
+
+Design (DB-backed):
+1) Add Prisma model RateLimitBucket:
+- id (cuid)
+- userId (nullable)
+- ip (nullable)
+- key (string)  // e.g. "chat_post", "job_stream", "proxy_get"
+- windowStart (DateTime)
+- windowSec (Int)
+- count (Int)
+- createdAt, updatedAt
+Indexes:
+- @@index([userId, key, windowStart])
+- @@index([ip, key, windowStart])
+Unique (to avoid duplicates):
+- @@unique([userId, ip, key, windowStart])
+
+2) Create `apps/web/lib/rate-limit.ts`:
+- function `rateLimit({ userId, ip, key, windowSec, limit, cost=1 }): { ok: boolean, remaining, resetAt }`
+- atomic increment using Prisma transaction:
+  - find bucket by (userId/ip + key + windowStart rounded to windowSec)
+  - create if missing, else increment
+- if exceeded: return ok=false
+
+3) Apply limits (initial defaults via env, with safe fallbacks):
+- CHAT_POST_LIMIT_PER_MIN (default 30)
+- JOB_STREAM_CONCURRENT_LIMIT (default 3)
+- PROXY_REQ_LIMIT_PER_MIN (default 120)
+- Add `RATE_LIMITS_ENABLED=1` default enabled.
+
+4) On limit exceeded:
+- return HTTP 429 with JSON:
+  { "error": "Rate limit exceeded", "key": "...", "resetAt": "...", "limit": <n> }
+
+5) SSE concurrency:
+- Track active streams in DB or in-memory + DB fallback.
+- Must not block legitimate reconnect/resume; count concurrent only per user.
+- On too many streams: return 429.
+
+Proof required:
+- Add a minimal internal test route auth-protected: GET /api/tests/ratelimit
+  It triggers rateLimit() repeatedly and returns pass/fail JSON.
+- Demonstrate:
+  - normal chat works under limit
+  - exceeding limit returns 429
+  - proxy endpoint returns 429 when spammed
+  - no effect when RATE_LIMITS_ENABLED=0
+
+Stop on errors, minimal fixes only, then report what changed.

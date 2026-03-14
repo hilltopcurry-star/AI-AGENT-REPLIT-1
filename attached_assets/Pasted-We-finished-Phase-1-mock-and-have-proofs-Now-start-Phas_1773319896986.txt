@@ -1,0 +1,46 @@
+We finished Phase‑1 (mock) and have proofs. Now start Phase‑2 design.
+
+Phase‑2 Goal (Product)
+Turn this into a real AI app builder:
+
+Mature chat (non‑technical users)
+Agent asks clarifying questions, proposes plan, then asks permission: “Should I build now?”
+User should NOT need to know “Build it” phrase; UI should include a Build confirmation button. (We can keep “Build it” as hidden/internal or backward compatible.)
+Real build: generate/modify project files deterministically based on spec + LLM, run install/build, deploy, then return a live URL to customer.
+Agent must be honest (no fake claims).
+Constraints / Requirements
+Keep Phase‑1 contract paths intact (don’t break).
+Phase‑2 can add new endpoints and background job runner, but UI must remain simple (still Chat/Console/Database for now unless we explicitly add later).
+Must support multi‑tenant auth and prevent cross‑user data access.
+Add “memory” safely: store user preferences + prior feedback in DB (no weight training).
+Deliverables (in this order)
+Architecture doc in docs/phase2.md including:
+components (chat orchestrator, tool runner, job runner, deployer)
+data flow & security model
+what runs where (server actions / API / worker)
+DB schema additions proposal (Prisma) for:
+UserPreference or Memory table
+BuildArtifact / Deployment table (url, status, provider, logs)
+Tooling plan
+file system sandbox strategy (per job workspace dir)
+how to run commands safely (npm install/build)
+how to stream logs to JobLog (reuse current SSE)
+Deployment plan
+Phase‑2 deploy target: (a) Replit Deployments first, then (b) Railway+Neon later
+how to obtain and store final deployed URL and show to user
+Conversation policy
+3‑step: Clarify → Plan → Confirm build
+handle angry user: default template build + allow improvements
+never lie; if uncertain, ask.
+Milestone breakdown
+Phase‑2.1: Replace mock agent with real LLM (behind feature flag)
+Phase‑2.2: Real file generation + tests
+Phase‑2.3: Deployment + live URL output
+Phase‑2.4: Memory + feedback loop + regression tests
+Ask me 5 questions at the end:
+
+deployment target preference
+supported stacks (Next only or more)
+allowed build time limits
+memory retention rules
+pricing/limits (if any)

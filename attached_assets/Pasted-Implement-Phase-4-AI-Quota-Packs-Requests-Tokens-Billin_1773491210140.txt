@@ -1,0 +1,82 @@
+Implement Phase‑4: AI Quota Packs (Requests + Tokens) + Billing UI + (Stripe if env available, otherwise DEV mock top-up).
+
+We already have AI quota fallback + /api/ai/status + Basic Mode toggle. Now add actual quota balances + purchases.
+
+A) Prisma models (minimal)
+Add:
+1) AiQuotaLedger
+- id (cuid)
+- userId (FK)
+- addRequests Int
+- addTokens Int
+- reason String
+- source String (stripe|bonus|promo|mock)
+- createdAt DateTime
+Index: @@index([userId, createdAt])
+
+2) AiQuotaBalance (cached)
+- userId unique
+- remainingRequests Int
+- remainingTokens Int
+- updatedAt DateTime
+
+3) (Optional) StripePurchase
+- id, userId, kind ("build_credits"|"ai_quota"), stripeSessionId unique, status, createdAt
+
+Run prisma generate + db push.
+
+B) Server lib: apps/web/lib/ai-quota.ts
+Implement transactional functions:
+- ensureInitialAiQuota(userId)  // optional small free starter like 5 req / 5k tokens (idempotent)
+- getAiQuota(userId)
+- addAiQuota(userId, req, tok, reason, source)
+- deductAiQuotaAtomic(userId, reqCost, tokCost)  // fail if would go negative
+Return typed error: AI_QUOTA_EXHAUSTED with remaining values.
+
+C) Enforce quota in llm-agent.ts (only when actually calling OpenAI)
+Before OpenAI call:
+- if OPENAI_KILL_SWITCH=1 => fallback (already)
+- else:
+  - read token usage estimate (use OPENAI_MAX_TOKENS_PER_REQUEST as ceiling)
+  - deductAiQuotaAtomic(userId, 1 request, estimatedTokens)
+If insufficient:
+- do NOT call OpenAI
+- trigger fallback message + aiLimited=true
+
+After OpenAI response:
+- adjust tokens with actual usage if available (optional for accuracy)
+- never allow negative.
+
+D) Billing UI (/billing)
+Add AI Quota section separate from Build Credits:
+- Show remainingRequests + remainingTokens
+- Packs (configurable):
+  - $10: +50 req + 50k tok
+  - $20: +120 req + 150k tok
+  - $100: +1000 req + 1.5M tok
+Each purchase shows “+2 bonus build credits” is separate (already done) — do NOT mix.
+Add ledger table for AI quota (last 10 AiQuotaLedger).
+
+E) API routes (auth-protected)
+- GET /api/billing/ai-quota -> { remainingRequests, remainingTokens }
+- GET /api/billing/ai-quota/ledger -> entries
+- POST /api/billing/ai-quota/mock-purchase -> adds quota (DEV only, gated by DEV_MODE=1)
+
+F) Stripe wiring (only if env exists)
+If STRIPE_SECRET_KEY + WEBHOOK secret + price IDs exist:
+- create checkout sessions for ai_quota packs
+- webhook handler adds quota to AiQuotaBalance + ledger
+If env missing: keep mock purchase only.
+
+G) Header badge integration
+Update AiStatusBadge / header area to also show:
+- “AI Quota: <req> / <tok>”
+and link to /billing.
+
+Proof required (browser logged in):
+1) Billing page shows AI quota balance and packs
+2) Use mock purchase to add quota -> balance increases + ledger entry appears
+3) Exhaust quota -> chat falls back to Basic Mode, not blocked, credits unaffected
+4) Build still works if build credits >= reserve
+
+Stop on errors, minimal changes, keep 564 tests passing (update tests only if needed).

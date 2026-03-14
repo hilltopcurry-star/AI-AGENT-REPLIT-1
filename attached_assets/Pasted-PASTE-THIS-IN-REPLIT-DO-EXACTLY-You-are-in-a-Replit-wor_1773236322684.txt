@@ -1,0 +1,118 @@
+PASTE THIS IN REPLIT (DO EXACTLY)
+You are in a Replit workspace. Overwriting is allowed.
+
+1) Restore Phase‑1 archive + install deps (RUN EXACTLY)
+In Shell, run:
+
+bash
+
+ls -lah ai-workspace-phase1.tar.gz || true
+tar -xzf ai-workspace-phase1.tar.gz -C .
+npm install
+cd apps/web
+npm install
+✅ After running, copy/paste the full output here.
+
+2) Generate NEXTAUTH_SECRET (RUN + PASTE OUTPUT)
+Run:
+
+bash
+
+openssl rand -base64 32
+✅ Paste the exact output string.
+
+3) Check Replit Secrets (ONLY ASK USER FOR VALUES)
+Open Replit → Secrets. If any are missing, ask me to paste values for:
+
+DATABASE_URL
+NEXTAUTH_URL
+NEXTAUTH_SECRET (use the one generated above)
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+Optional (only if code requires later):
+
+STRIPE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET
+STRIPE_PRICE_ID_PRO
+✅ After setting secrets, confirm which ones are set (names only).
+
+4) Prisma + Run dev server (RUN EXACTLY)
+In Shell:
+
+bash
+
+cd apps/web
+npx prisma generate
+npx prisma db push
+npm run dev
+✅ Paste full output + the running Replit URL.
+
+5) Verify endpoints (RUN + PASTE PROOF)
+Once server is running, open the web app.
+
+Hit health endpoint in browser:
+GET /api/health should return:
+json
+
+{ "ok": true }
+✅ Paste the JSON.
+
+Login with Google (if env provided) and create/open a Project.
+
+In Build mode, send exactly:
+
+Build it
+Expected behavior (STRICT):
+
+Mock Agent asks exactly 3 deterministic questions first
+then proposes a deterministic Plan
+Job is created ONLY when:
+selected mode === “Build”
+message === “Build it” (case-insensitive OK)
+Job must insert deterministic [MOCK] JobLog rows in DB
+Console streams logs via SSE from DB using cursor polling (lastCreatedAt + lastId)
+✅ After job starts, provide:
+
+jobId
+Response of:
+GET /api/jobs/<jobId>/logs
+GET /api/jobs/<jobId>/stream (show a few streamed lines proving SSE)
+6) If anything fails (STRICT)
+If any command fails:
+
+STOP
+paste the full error output
+do NOT guess
+we will apply the minimal fix and continue
+Required contract checklist (DO NOT ADD EXTRA TABS/FEATURES)
+UI must be only: Chat / Console / Database No real LLM/OpenAI calls. Use deterministic Mock Agent only.
+
+These paths must exist EXACTLY:
+
+prisma/schema.prisma
+apps/web/app/(dashboard)/projects/[id]/page.tsx
+apps/web/components/workspace/ChatPanel.tsx
+apps/web/components/workspace/ConsolePanel.tsx
+apps/web/components/workspace/DatabasePanel.tsx
+apps/web/lib/mock-agent.ts
+API routes must exist:
+
+apps/web/app/api/health/route.ts
+apps/web/app/api/projects/[id]/chat/route.ts
+apps/web/app/api/jobs/[jobId]/logs/route.ts
+apps/web/app/api/jobs/[jobId]/stream/route.ts (SSE)
+Prisma models must include (with relations/index):
+
+User
+Project (must include specJson)
+Chat
+Message
+Job
+JobLog
+Database tab must show:
+
+/api/health response
+project.specJson read-only
+After you run Steps 1–4
+Paste ALL outputs here. I will then tell you minimal patches (if any) to make everything match the contract and to produce final proof.
+

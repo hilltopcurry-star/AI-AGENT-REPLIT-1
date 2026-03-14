@@ -1,0 +1,50 @@
+ look inside the archives, because right now the live workspace is the wrong stack and your required files don’t exist. Since they already created:
+
+ai-workspace-backup-20260311-0855.tar.gz
+ai-workspace-phase1.tar.gz
+…we can audit without touching current files by extracting to a new folder only.
+
+Copy/paste this exact instruction to Replit:
+
+YES — INSPECT ARCHIVES (READ‑ONLY). DO NOT MODIFY CURRENT PROJECT.
+You are NOT allowed to change or delete any existing files in the current workspace.
+
+Step A) Create a safe inspection folder
+bash
+
+mkdir -p /tmp/audit-backup /tmp/audit-phase1
+Step B) List archive contents (no extraction yet)
+Run and paste outputs:
+
+bash
+
+tar -tzf ai-workspace-backup-20260311-0855.tar.gz | head -n 80
+tar -tzf ai-workspace-phase1.tar.gz | head -n 80
+tar -tzf ai-workspace-backup-20260311-0855.tar.gz | grep -E '(^|/)prisma/schema\.prisma$|(^|/)apps/web/app/\(dashboard\)/projects/\[id\]/page\.tsx$|(^|/)apps/web/lib/mock-agent\.ts$|(^|/)apps/web/app/api/|(^|/)app/\(dashboard\)/projects/\[id\]/page\.tsx$' | head -n 200
+tar -tzf ai-workspace-phase1.tar.gz | grep -E '(^|/)prisma/schema\.prisma$|(^|/)apps/web/app/\(dashboard\)/projects/\[id\]/page\.tsx$|(^|/)apps/web/lib/mock-agent\.ts$|(^|/)apps/web/app/api/|(^|/)app/\(dashboard\)/projects/\[id\]/page\.tsx$' | head -n 200
+Step C) Extract archives to /tmp (safe) for auditing
+bash
+
+tar -xzf ai-workspace-backup-20260311-0855.tar.gz -C /tmp/audit-backup
+tar -xzf ai-workspace-phase1.tar.gz -C /tmp/audit-phase1
+Step D) Show the extracted tree (key parts only)
+Run and paste:
+
+bash
+
+ls -la /tmp/audit-backup | head
+ls -la /tmp/audit-phase1 | head
+
+find /tmp/audit-phase1 -maxdepth 4 -type d -print | head -n 80
+find /tmp/audit-phase1 -maxdepth 6 -type f \( -name "schema.prisma" -o -name "mock-agent.ts" -o -name "page.tsx" -o -name "route.ts" \) | head -n 200
+Step E) If Phase‑1 files exist, paste contents (read-only)
+If these exist inside /tmp/audit-phase1/, paste them:
+
+prisma/schema.prisma
+apps/web/app/(dashboard)/projects/[id]/page.tsx (or app/(dashboard)/projects/[id]/page.tsx if flat)
+apps/web/lib/mock-agent.ts
+chat route file
+job logs SSE route file
+Do NOT move them into the current workspace. Only paste contents for audit.
+
+Reason: this will prove whether your real Phase‑1 build exists inside the archives, and we can restore cleanly (without overwriting) by creating a NEW repl or NEW folder later.

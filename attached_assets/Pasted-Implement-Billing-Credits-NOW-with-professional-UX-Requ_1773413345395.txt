@@ -1,0 +1,86 @@
+Implement Billing/Credits NOW with professional UX. Requirements:
+
+Non‑negotiables:
+- Chat must NEVER suddenly stop. If credits are 0, BUILD/DEPLOY must stop but chat continues with clear guidance.
+- Credits balance must be clearly visible in the UI (top bar + Database tab).
+- Provide a Billing page with Upgrade/Add credits buttons.
+- If Stripe env vars exist, wire Stripe checkout; otherwise provide mock-credit top-up for dev.
+- No new tabs inside project workspace (still Chat/Console/Database). Billing page can be outside workspace.
+
+1) Prisma models (add minimally)
+Add these models with relations/index:
+- CreditLedger
+  - id, userId, amount (Int), reason (string), source (stripe|admin|promo|mock), createdAt
+  - @@index([userId, createdAt])
+- CreditBalance (optional cache)
+  - userId (unique), balance (Int), updatedAt
+- Plan (optional)
+  - id, key ("basic","pro"), monthlyPrice, includedCredits
+- CreditUsage
+  - id, userId, jobId (nullable), projectId (nullable), amount (Int), action ("build","deploy","llm"), createdAt
+  - @@index([userId, createdAt])
+Keep existing schema intact.
+
+2) Server logic (central, reusable)
+Create `apps/web/lib/credits.ts`:
+- getBalance(userId)
+- requireCredits(userId, cost, action, {allowNegative:false})
+  - if insufficient: throw a typed error {code:"NO_CREDITS", balance, required}
+- addCredits(userId, amount, reason, source)
+- deductCredits(userId, amount, action, jobId?, projectId?)
+All must be transactional in Prisma.
+
+3) Costs (env-configurable)
+Add env vars with defaults:
+- CREDITS_ENABLED=1
+- COST_BUILD=10
+- COST_DEPLOY=5
+- COST_LLM_REQUEST=1 (optional)
+- LOW_CREDITS_THRESHOLD=5
+
+4) Enforce credits WITHOUT breaking chat
+- LLM chat messages are allowed even at 0 credits OR limited (your choice), but must be transparent.
+- Build trigger path (job creation) must call requireCredits(userId, COST_BUILD, "build")
+  - If no credits:
+    - Do NOT create Job
+    - Return assistant message: “You’re out of credits. Go to Billing to add credits. Your project is saved.”
+    - Include a CTA link to /billing
+- Deploy step must call requireCredits(userId, COST_DEPLOY, "deploy")
+  - If no credits:
+    - Mark deployment FAILED with error “Insufficient credits”
+    - Log [DEPLOY] blocked by credits
+    - Chat message guides user to billing
+- Optional: LLM usage deduction per request. If too risky now, implement later, but at least show usage in Observability.
+
+5) UI (professional)
+A) Global top bar (outside workspace too):
+- Show Credits badge: e.g. “Credits: 12”
+- If balance <= LOW_CREDITS_THRESHOLD: yellow warning + “Add credits”
+- If 0: red banner “Out of credits” + button “Go to Billing”
+B) Billing page `/billing`:
+- Shows current plan + credits balance
+- Buttons:
+  - “Buy 20 credits ($20)” (basic)
+  - “Buy 100 credits ($100)” (pro)
+- If Stripe keys present: real checkout
+- If not: DEV mode “Add mock credits” button (auth-protected) for testing only
+C) Database tab:
+- Show credits balance + last 10 ledger entries
+
+6) Smart confirm (as requested)
+- When agent is in Confirm step, user messages like “yes”, “ok”, “please build”, “go ahead” should count as confirmation.
+- BUT only if state == “awaiting_confirmation”; otherwise do NOT trigger builds.
+- If confirmed and credits insufficient: show billing guidance (no job).
+
+7) Proof required (browser, logged in)
+- Show credits badge in header
+- Set credits low (dev/mock) and show warning banner
+- Set credits to 0 and confirm:
+  - Chat still works
+  - Build attempt results in message guiding to Billing
+- Add credits (Stripe or mock) then Build works and deploy works
+- Provide screenshots + key API outputs:
+  - GET /api/billing/balance (create this endpoint) -> {balance}
+  - GET /api/billing/ledger -> entries
+
+Stop on errors. Minimal changes, clean UX.

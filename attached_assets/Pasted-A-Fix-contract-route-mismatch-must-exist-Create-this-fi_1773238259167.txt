@@ -1,0 +1,51 @@
+A) Fix contract route mismatch (must exist):
+Create this file exactly: apps/web/app/api/projects/[id]/chat/route.ts
+
+It should behave as an alias wrapper to the existing chat endpoint (currently apps/web/app/api/chats/[id]/messages/route.ts exists). We must not duplicate logic; re-export or call the same handler. The wrapper route must:
+
+accept POST with JSON body { message: string, mode: "Chat" | "Build" | ... } (keep whatever app uses, but ensure mode is available)
+locate the Project by params.id
+ensure chat message processing uses lib/mock-agent.ts ONLY
+strict behavior: only create a Job when mode === "Build" AND message equals "Build it" (case-insensitive OK)
+otherwise: mock-agent asks exactly 3 deterministic questions first, then deterministic plan.
+Implementation guidance (minimal):
+
+If existing handler is in api/chats/[id]/messages/route.ts, import its POST function and call it.
+If existing handler expects chatId, adapt by resolving/creating the project’s chat and calling same internal function.
+If easiest: refactor shared logic into apps/web/lib/chat-handler.ts and import from both routes. Minimal and deterministic.
+B) Ensure required component filenames exist exactly (PascalCase)
+Verify these exact paths exist; if lowercase versions still referenced, update imports:
+
+apps/web/components/workspace/ChatPanel.tsx
+.../ConsolePanel.tsx
+.../DatabasePanel.tsx
+Run ripgrep and fix imports:
+
+search for chat-panel, console-panel, database-panel and update to PascalCase.
+C) Ensure SSE job streaming route works and is DB-backed
+Confirm:
+
+apps/web/app/api/jobs/[jobId]/stream/route.ts streams JobLog rows using cursor-based polling: (lastCreatedAt, lastId) (tie-break by id)
+all logs are clearly prefixed [MOCK]
+apps/web/app/api/jobs/[jobId]/logs/route.ts returns deterministic logs from DB.
+D) After changes, run and provide proof commands output
+Run:
+
+bash
+
+cd apps/web
+npm run dev -- -p 5000
+Then show:
+
+curl -sS http://localhost:5000/api/health
+Create/open a project in UI → Build mode → send exactly Build it
+Print jobId from DB (query prisma) OR from response.
+Show:
+bash
+
+curl -sS "http://localhost:5000/api/jobs/<jobId>/logs"
+curl -N  "http://localhost:5000/api/jobs/<jobId>/stream" | head -n 30
+Stop immediately on errors and print full stack/trace.
+
+Only minimal edits; no new tabs/features; UI must stay Chat/Console/Database only; no real LLM/OpenAI usage.
+
