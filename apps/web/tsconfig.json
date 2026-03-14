@@ -35,7 +35,10 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     "/home/runner/workspace/.tmp-vitest/.next-test/types/**/*.ts",
-    "/home/runner/workspace/.tmp-vitest/.next-test/dev/types/**/*.ts"
+    "/home/runner/workspace/.tmp-vitest/.next-test/dev/types/**/*.ts",
+    "../../.tmp-vitest/.next-test/types/**/*.ts",
+    "../../.tmp-vitest/.next-test/dev/types/**/*.ts",
+    "../../.tmp-vitest/.next-test/dev/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

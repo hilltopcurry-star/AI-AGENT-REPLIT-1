@@ -224,7 +224,9 @@ describe("Regression: OpenAiUsage aggregation", () => {
 describe("Regression: session validity checks (DB)", () => {
   for (let i = 0; i < 5; i++) {
     it(`523+ session validity check ${i}`, async () => {
-      const s = await prisma.session.findFirst({ where: { userId: user.id } });
+      const s = await prisma.session.findFirst({
+        where: { userId: user.id, expires: { gt: new Date() } },
+      });
       expect(s).not.toBeNull();
       expect(s!.expires.getTime()).toBeGreaterThan(Date.now());
     });

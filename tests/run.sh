@@ -75,8 +75,11 @@ log "Starting test server on port $FREE_PORT (mock mode)..."
 
 rm -rf "$TEST_NEXT_DIR" 2>/dev/null
 mkdir -p "$TEST_NEXT_DIR"
+rm -f "$ROOT_DIR/apps/web/.next/dev/lock" 2>/dev/null
 
 lsof -ti :"$FREE_PORT" 2>/dev/null | xargs kill -9 2>/dev/null || true
+
+TEST_NEXT_REL=$(node -e "console.log(require('path').relative('$ROOT_DIR/apps/web', '$TEST_NEXT_DIR'))" 2>/dev/null || echo "$TEST_NEXT_DIR")
 
 cd "$ROOT_DIR/apps/web"
 AI_AGENT_MODE=mock \
@@ -86,7 +89,7 @@ RATE_LIMITS_ENABLED=0 \
 CREDITS_ENABLED=0 \
 AI_QUOTA_ENABLED=0 \
 HOSTNAME=0.0.0.0 \
-NEXT_DIST_DIR="$TEST_NEXT_DIR" \
+NEXT_DIST_DIR="$TEST_NEXT_REL" \
 NODE_OPTIONS="--max-old-space-size=512" \
 npx next dev -p "$FREE_PORT" \
   > "$TMPDIR/test-server.log" 2>&1 &
