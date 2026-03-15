@@ -1,0 +1,301 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String       @id @default(cuid())
+  name          String?
+  email         String?      @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  projects      Project[]
+  deployments    Deployment[]
+  memoryItems    MemoryItem[]
+  creditLedger   CreditLedger[]  @relation("CreditLedgerUser")
+  creditBalance  CreditBalance?  @relation("CreditBalanceUser")
+  creditUsage    CreditUsage[]   @relation("CreditUsageUser")
+  buildQueueJobs BuildQueueJob[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Project {
+  id          String       @id @default(cuid())
+  userId      String
+  name        String       @default("New Project")
+  specJson    Json?
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chats       Chat[]
+  jobs        Job[]
+  deployments    Deployment[]
+  memoryItems    MemoryItem[]
+  buildQueueJobs BuildQueueJob[] @relation("BuildQueueProject")
+  createdAt      DateTime     @default(now())
+}
+
+model Chat {
+  id        String    @id @default(cuid())
+  projectId String
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  messages  Message[]
+  createdAt DateTime  @default(now())
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  chatId    String
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  mode      String   @default("Discuss")
+  role      String
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+}
+
+model Job {
+  id             String          @id @default(cuid())
+  projectId      String
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status         String          @default("PENDING")
+  logs           JobLog[]
+  buildArtifact  BuildArtifact?
+  deployment     Deployment?
+  createdAt      DateTime        @default(now())
+}
+
+model JobLog {
+  id        String   @id @default(cuid())
+  jobId     String
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  level     String
+  message   String   @db.Text
+  createdAt DateTime @default(now())
+}
+
+model BuildArtifact {
+  id            String   @id @default(cuid())
+  jobId         String   @unique
+  job           Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  projectId     String?
+  userId        String?
+  type          String   @default("source_tar")
+  workspacePath String
+  pathOrRef     String?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([projectId])
+}
+
+model BuildQueueJob {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId     String
+  project       Project   @relation("BuildQueueProject", fields: [projectId], references: [id], onDelete: Cascade)
+  jobId         String?
+  status        String    @default("QUEUED")
+  priority      Int       @default(0)
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(3)
+  lockedAt      DateTime?
+  lockedBy      String?
+  availableAt   DateTime  @default(now())
+  error         String?   @db.Text
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  flyDeployment FlyDeployment?
+
+  @@index([status, priority, availableAt, createdAt])
+  @@index([userId, createdAt])
+}
+
+model FlyDeployment {
+  id            String   @id @default(cuid())
+  userId        String
+  projectId     String
+  queueJobId    String   @unique
+  queueJob      BuildQueueJob @relation(fields: [queueJobId], references: [id], onDelete: Cascade)
+  status        String   @default("PENDING")
+  appName       String?
+  url           String?
+  error         String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+  @@index([projectId])
+}
+
+model MemoryItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  scope     String
+  key       String
+  value     String   @db.Text
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@unique([userId, projectId, scope, key])
+  @@index([userId, expiresAt])
+  @@index([projectId, expiresAt])
+}
+
+model OpenAiUsage {
+  id        String   @id @default(cuid())
+  userId    String
+  date      String
+  requests  Int      @default(0)
+  tokens    Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+model RateLimitBucket {
+  id          String   @id @default(cuid())
+  userId      String?
+  ip          String?
+  key         String
+  windowStart DateTime
+  windowSec   Int
+  count       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, ip, key, windowStart])
+  @@index([userId, key, windowStart])
+  @@index([ip, key, windowStart])
+}
+
+model CreditLedger {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("CreditLedgerUser", fields: [userId], references: [id], onDelete: Cascade)
+  amount    Int
+  reason    String
+  source    String
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model CreditBalance {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation("CreditBalanceUser", fields: [userId], references: [id], onDelete: Cascade)
+  balance   Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model CreditUsage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("CreditUsageUser", fields: [userId], references: [id], onDelete: Cascade)
+  jobId     String?
+  projectId String?
+  amount    Int
+  action    String
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model AiQuotaLedger {
+  id             String   @id @default(cuid())
+  userId         String
+  amountRequests Int
+  amountTokens   Int
+  reason         String
+  source         String
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model AiQuotaBalance {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  remainingRequests Int      @default(0)
+  remainingTokens   Int      @default(0)
+  updatedAt         DateTime @updatedAt
+}
+
+model StripePurchase {
+  id              String   @id @default(cuid())
+  userId          String
+  kind            String
+  stripeSessionId String   @unique
+  status          String   @default("pending")
+  amount          Int
+  createdAt       DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model Deployment {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  jobId        String   @unique
+  job          Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  provider     String   @default("replit")
+  status       String   @default("PENDING")
+  url          String?
+  error        String?  @db.Text
+  internalPort Int?
+  workspacePath String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+  @@index([projectId])
+}

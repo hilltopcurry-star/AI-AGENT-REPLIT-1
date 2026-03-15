@@ -4,13 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p ${PORT:-5000}",
-    "build": "prisma generate --schema ../../prisma/schema.prisma && next build",
+    "build": "prisma generate && next build",
     "start": "next start -p ${PORT:-3000}",
-    "postinstall": "prisma generate --schema ../../prisma/schema.prisma",
+    "postinstall": "prisma generate",
     "worker": "npx tsx worker/index.ts"
   },
   "prisma": {
-    "schema": "../../prisma/schema.prisma"
+    "schema": "prisma/schema.prisma"
   },
   "dependencies": {
     "prisma": "^5.22.0",
