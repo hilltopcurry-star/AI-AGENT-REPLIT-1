@@ -191,7 +191,7 @@ function runCommand(
       .filter((p) => p.startsWith("/nix/store/") || p === "/usr/local/bin" || p === "/usr/bin" || p === "/bin")
       .join(":");
 
-    const safeEnv: Record<string, string> = {
+    const safeEnv: NodeJS.ProcessEnv = {
       PATH: systemPath || "/usr/local/bin:/usr/bin:/bin",
       HOME: cwd,
       NODE_ENV: "production",
