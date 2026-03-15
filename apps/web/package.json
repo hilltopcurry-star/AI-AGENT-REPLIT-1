@@ -8,5 +8,9 @@
     "start": "next start -p ${PORT:-3000}",
     "postinstall": "prisma generate",
     "worker": "npx tsx worker/index.ts"
+  },
+  "dependencies": {
+    "prisma": "^5.22.0",
+    "@prisma/client": "^5.22.0"
   }
 }
