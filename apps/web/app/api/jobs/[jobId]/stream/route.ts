@@ -8,12 +8,13 @@ export async function GET(
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   const session = await auth();
-  if (!session?.user?.id) {
+  const userId = session?.user?.id;
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const streamLimit = getEnvLimit("JOB_STREAM_CONCURRENT_LIMIT", 3);
-  const streamCheck = acquireStream(session.user.id, streamLimit);
+  const streamCheck = acquireStream(userId, streamLimit);
   if (!streamCheck.ok) {
     return NextResponse.json(
       { error: "Rate limit exceeded", key: "job_stream", limit: streamLimit, current: streamCheck.current },
@@ -25,7 +26,7 @@ export async function GET(
   const safeRelease = () => {
     if (!released) {
       released = true;
-      releaseStream(session.user.id);
+      releaseStream(userId);
     }
   };
 
@@ -36,7 +37,7 @@ export async function GET(
       include: { project: { select: { userId: true } } },
     });
 
-    if (!job || job.project.userId !== session.user.id) {
+    if (!job || job.project.userId !== userId) {
       safeRelease();
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
