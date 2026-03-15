@@ -28,7 +28,7 @@ function runCommand(
   return new Promise((resolve) => {
     const systemPath = process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
 
-    const safeEnv: Record<string, string> = {
+    const safeEnv: NodeJS.ProcessEnv = {
       PATH: systemPath,
       HOME: cwd,
       NODE_ENV: "production",
