@@ -66,15 +66,21 @@ export function isDeploymentRunning(deploymentId: string): boolean {
 }
 
 function getSystemPath(): string {
-  return (process.env.PATH || "/usr/local/bin:/usr/bin:/bin")
-    .split(":")
-    .filter((p) => p.startsWith("/nix/store/") || p === "/usr/local/bin" || p === "/usr/bin" || p === "/bin")
-    .join(":");
+  const isReplit = !!process.env.REPL_ID;
+  if (isReplit) {
+    return (process.env.PATH || "/usr/local/bin:/usr/bin:/bin")
+      .split(":")
+      .filter((p) => p.startsWith("/nix/store/") || p === "/usr/local/bin" || p === "/usr/bin" || p === "/bin")
+      .join(":");
+  }
+  return process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
 }
 
 function spawnNextStart(workspacePath: string, port: number): ChildProcess {
   const systemPath = getSystemPath();
-  return spawn("npx", ["next", "start", "-p", String(port)], {
+  const nextBin = path.join(workspacePath, "node_modules", "next", "dist", "bin", "next");
+  console.log(`[DEPLOY] Starting next via node: ${nextBin}`);
+  return spawn(process.execPath, [nextBin, "start", "-p", String(port)], {
     cwd: workspacePath,
     env: {
       PATH: systemPath || "/usr/local/bin:/usr/bin:/bin",
