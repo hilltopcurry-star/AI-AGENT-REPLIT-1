@@ -222,9 +222,17 @@ export async function deployWorkspace({
       throw new Error(errMsg);
     }
 
-    const domain = process.env.REPLIT_DOMAINS?.split(",")[0] || "localhost:5000";
-    const protocol = domain.includes("localhost") ? "http" : "https";
-    const liveUrl = `${protocol}://${domain}/api/deployments/${deploymentId}/proxy`;
+    let baseUrl = process.env.NEXTAUTH_URL || process.env.AUTH_URL || "";
+    if (!baseUrl) {
+      const domain = process.env.REPLIT_DOMAINS?.split(",")[0] || "";
+      if (domain) {
+        baseUrl = `https://${domain}`;
+      } else {
+        baseUrl = `http://localhost:5000`;
+      }
+    }
+    baseUrl = baseUrl.replace(/\/+$/, "");
+    const liveUrl = `${baseUrl}/api/deployments/${deploymentId}/proxy`;
 
     await prisma.deployment.update({
       where: { id: deploymentId },
