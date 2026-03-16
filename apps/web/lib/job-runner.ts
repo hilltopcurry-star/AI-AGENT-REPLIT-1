@@ -186,10 +186,15 @@ function runCommand(
   onLine: (line: string) => void
 ): Promise<{ exitCode: number; killed: boolean }> {
   return new Promise((resolve) => {
-    const systemPath = (process.env.PATH || "/usr/local/bin:/usr/bin:/bin")
-      .split(":")
-      .filter((p) => p.startsWith("/nix/store/") || p === "/usr/local/bin" || p === "/usr/bin" || p === "/bin")
-      .join(":");
+    const isReplit = !!process.env.REPL_ID;
+    const systemPath = isReplit
+      ? (process.env.PATH || "/usr/local/bin:/usr/bin:/bin")
+          .split(":")
+          .filter((p) => p.startsWith("/nix/store/") || p === "/usr/local/bin" || p === "/usr/bin" || p === "/bin")
+          .join(":")
+      : process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
+
+    onLine(`[RUNNER] env=${isReplit ? "replit" : "production"} PATH=${systemPath}`);
 
     const safeEnv: NodeJS.ProcessEnv = {
       PATH: systemPath || "/usr/local/bin:/usr/bin:/bin",
