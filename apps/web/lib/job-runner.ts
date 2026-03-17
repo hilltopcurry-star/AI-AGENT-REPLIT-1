@@ -88,7 +88,9 @@ function generateScaffold(workspaceDir: string, spec: Record<string, unknown> | 
   }, null, 2));
 
   writeFile(workspaceDir, "next.config.js", `/** @type {import('next').NextConfig} */
-const nextConfig = {};
+const nextConfig = {
+  output: "standalone",
+};
 module.exports = nextConfig;
 `);
 

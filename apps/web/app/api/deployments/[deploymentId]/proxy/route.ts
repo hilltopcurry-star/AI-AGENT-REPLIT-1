@@ -111,6 +111,20 @@ async function proxyRoot(
       }
     });
 
+    const contentType = upstream.headers.get("content-type") || "";
+    if (contentType.includes("text/html")) {
+      let html = await upstream.text();
+      const proxyBase = `/api/deployments/${deploymentId}/proxy`;
+      html = html.replace(/"\/_next\//g, `"${proxyBase}/_next/`);
+      html = html.replace(/'\/_next\//g, `'${proxyBase}/_next/`);
+      responseHeaders.set("content-type", contentType);
+      responseHeaders.delete("content-length");
+      return new Response(html, {
+        status: upstream.status,
+        headers: responseHeaders,
+      });
+    }
+
     return new Response(upstream.body, {
       status: upstream.status,
       headers: responseHeaders,
