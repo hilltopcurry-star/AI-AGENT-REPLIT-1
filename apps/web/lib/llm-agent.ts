@@ -2,7 +2,7 @@ import { prisma } from "./prisma";
 import { getMemory, cleanupExpiredMemory } from "./memory";
 import { getToolDefinitions, executeTool } from "./tools";
 import type { AgentInput, AgentResponse } from "./agent";
-import { aiQuotaEnabled, requireAiQuota, deductAiQuotaAtomic, refundAiQuotaTokens, AiQuotaExhaustedError } from "./ai-quota";
+import { aiQuotaEnabled, getAiQuota, deductAiQuotaAtomic, refundAiQuotaTokens, AiQuotaExhaustedError } from "./ai-quota";
 
 export function isKillSwitchEnabled(): boolean {
   return process.env.OPENAI_KILL_SWITCH === "1";
@@ -50,19 +50,15 @@ export async function checkAiAvailability(userId: string): Promise<{
   if (!hasOpenAiKey()) {
     return { available: false, reason: "no_key" };
   }
+  if (aiQuotaEnabled()) {
+    const quota = await getAiQuota(userId);
+    if (quota.remainingRequests <= 0 || quota.remainingTokens <= 0) {
+      return { available: false, reason: "ai_quota_exhausted" };
+    }
+  }
   const usage = await checkDailyUsage(userId);
   if (!usage.allowed) {
     return { available: false, reason: "daily_limit" };
-  }
-  if (aiQuotaEnabled()) {
-    try {
-      await requireAiQuota(userId, 1, 1);
-    } catch (e) {
-      if (e instanceof AiQuotaExhaustedError) {
-        return { available: false, reason: "ai_quota_exhausted" };
-      }
-      throw e;
-    }
   }
   return { available: true };
 }
@@ -239,8 +235,16 @@ export async function processLlmMessage(input: AgentInput): Promise<AgentRespons
     openAiMessages.push({ role: "user", content: message });
   }
 
-  const maxTokensReserve = getMaxTokensPerRequest() * 6;
+  let maxTokensReserve = getMaxTokensPerRequest() * 6;
   if (aiQuotaEnabled()) {
+    const currentQuota = await getAiQuota(userId);
+    if (currentQuota.remainingRequests <= 0 || currentQuota.remainingTokens <= 0) {
+      return {
+        response: "Your AI quota has been exhausted. Please add more AI quota from the Billing page to continue using AI features. Your build credits remain available.",
+        shouldCreateJob: false,
+      };
+    }
+    maxTokensReserve = Math.min(maxTokensReserve, currentQuota.remainingTokens);
     try {
       await deductAiQuotaAtomic(userId, 1, maxTokensReserve);
     } catch (e) {
@@ -363,8 +367,16 @@ async function handleBuildMode(input: AgentInput, memory: Record<string, string>
       openAiMessages.push({ role: "user", content: message });
     }
 
-    const buildMaxReserve = getMaxTokensPerRequest();
+    let buildMaxReserve = getMaxTokensPerRequest();
     if (aiQuotaEnabled()) {
+      const currentQuota = await getAiQuota(userId);
+      if (currentQuota.remainingRequests <= 0 || currentQuota.remainingTokens <= 0) {
+        return {
+          response: "Your AI quota has been exhausted. Please add more AI quota from the Billing page.",
+          shouldCreateJob: false,
+        };
+      }
+      buildMaxReserve = Math.min(buildMaxReserve, currentQuota.remainingTokens);
       try {
         await deductAiQuotaAtomic(userId, 1, buildMaxReserve);
       } catch (e) {

@@ -78,6 +78,22 @@ export function AiStatusBadge() {
     );
   }
 
+  if (forced) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={handleClick}
+        data-testid="button-ai-status"
+        className="gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+      >
+        <ZapOff className="h-3.5 w-3.5" />
+        <span data-testid="text-ai-status">Basic Mode</span>
+        <span className="text-[10px]">(tap to restore)</span>
+      </Button>
+    );
+  }
+
   if (isLimited) {
     return (
       <Button
@@ -89,7 +105,6 @@ export function AiStatusBadge() {
       >
         <ZapOff className="h-3.5 w-3.5" />
         <span data-testid="text-ai-status">AI: limited</span>
-        {forced && <span className="text-[10px]">(tap to restore)</span>}
       </Button>
     );
   }
