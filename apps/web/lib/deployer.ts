@@ -78,19 +78,33 @@ function getSystemPath(): string {
 
 function spawnNextStart(workspacePath: string, port: number): ChildProcess {
   const systemPath = getSystemPath();
+  const standaloneServer = path.join(workspacePath, ".next", "standalone", "server.js");
+  const safeEnv: NodeJS.ProcessEnv = {
+    PATH: systemPath || "/usr/local/bin:/usr/bin:/bin",
+    HOME: workspacePath,
+    NODE_ENV: "production",
+    PORT: String(port),
+    HOSTNAME: "0.0.0.0",
+    XDG_CONFIG_HOME: path.join(workspacePath, ".config"),
+    TMPDIR: workspacePath,
+  };
+
+  if (fs.existsSync(standaloneServer)) {
+    console.log(`[DEPLOY] Starting standalone server: ${standaloneServer}`);
+    return spawn(process.execPath, [standaloneServer], {
+      cwd: workspacePath,
+      env: safeEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+      detached: false,
+    });
+  }
+
   const nextBin = path.join(workspacePath, "node_modules", "next", "dist", "bin", "next");
   console.log(`[DEPLOY] Starting next via node: ${nextBin}`);
   return spawn(process.execPath, [nextBin, "start", "-p", String(port)], {
     cwd: workspacePath,
-    env: {
-      PATH: systemPath || "/usr/local/bin:/usr/bin:/bin",
-      HOME: workspacePath,
-      NODE_ENV: "production",
-      PORT: String(port),
-      HOSTNAME: "0.0.0.0",
-      XDG_CONFIG_HOME: path.join(workspacePath, ".config"),
-      TMPDIR: workspacePath,
-    },
+    env: safeEnv,
     stdio: ["ignore", "pipe", "pipe"],
     shell: false,
     detached: false,
