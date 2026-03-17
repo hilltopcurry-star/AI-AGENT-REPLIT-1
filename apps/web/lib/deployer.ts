@@ -76,9 +76,21 @@ function getSystemPath(): string {
   return process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
 }
 
-function spawnNextStart(workspacePath: string, port: number): ChildProcess {
+function findStandaloneServer(workspacePath: string): string | null {
+  const candidates = [
+    path.join(workspacePath, ".next", "standalone", "server.js"),
+    path.join(workspacePath, ".next", "standalone", path.basename(workspacePath), "server.js"),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+function spawnNextStart(workspacePath: string, port: number, logFn?: (msg: string) => void): ChildProcess {
   const systemPath = getSystemPath();
-  const standaloneServer = path.join(workspacePath, ".next", "standalone", "server.js");
+  const _log = (msg: string) => { if (logFn) logFn(msg); console.log(msg); };
+
   const safeEnv: NodeJS.ProcessEnv = {
     PATH: systemPath || "/usr/local/bin:/usr/bin:/bin",
     HOME: workspacePath,
@@ -89,10 +101,21 @@ function spawnNextStart(workspacePath: string, port: number): ChildProcess {
     TMPDIR: workspacePath,
   };
 
-  if (fs.existsSync(standaloneServer)) {
-    console.log(`[DEPLOY] Starting standalone server: ${standaloneServer}`);
+  const standaloneDir = path.join(workspacePath, ".next", "standalone");
+  _log(`[DEPLOY] .next exists: ${fs.existsSync(path.join(workspacePath, ".next"))}`);
+  _log(`[DEPLOY] .next/standalone exists: ${fs.existsSync(standaloneDir)}`);
+  if (fs.existsSync(standaloneDir)) {
+    try {
+      const files = fs.readdirSync(standaloneDir);
+      _log(`[DEPLOY] standalone contents: ${files.join(", ")}`);
+    } catch {}
+  }
+
+  const standaloneServer = findStandaloneServer(workspacePath);
+  if (standaloneServer) {
+    _log(`[DEPLOY] Starting standalone server: ${standaloneServer}`);
     return spawn(process.execPath, [standaloneServer], {
-      cwd: workspacePath,
+      cwd: path.dirname(standaloneServer),
       env: safeEnv,
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
@@ -101,7 +124,7 @@ function spawnNextStart(workspacePath: string, port: number): ChildProcess {
   }
 
   const nextBin = path.join(workspacePath, "node_modules", "next", "dist", "bin", "next");
-  console.log(`[DEPLOY] Starting next via node: ${nextBin}`);
+  _log(`[DEPLOY] Standalone not found, falling back to next start: ${nextBin}`);
   return spawn(process.execPath, [nextBin, "start", "-p", String(port)], {
     cwd: workspacePath,
     env: safeEnv,
@@ -187,7 +210,7 @@ export async function deployWorkspace({
     await log(jobId, "INFO", `[DEPLOY] Deployment ${deploymentId} created (provider: replit-proxy)`);
     await log(jobId, "INFO", `[DEPLOY] Assigned internal port: ${port}`);
 
-    const proc = spawnNextStart(workspacePath, port);
+    const proc = spawnNextStart(workspacePath, port, (msg) => { void log(jobId, "INFO", msg); });
 
     const startupTimer = setTimeout(() => {
       try { proc.kill("SIGTERM"); } catch {}
