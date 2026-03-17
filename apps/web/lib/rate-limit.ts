@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { isAdminUser } from "./admin";
 
 interface RateLimitParams {
   userId?: string | null;
@@ -38,6 +39,9 @@ export async function rateLimit({
   cost = 1,
 }: RateLimitParams): Promise<RateLimitResult> {
   if (!isRateLimitEnabled()) {
+    return { ok: true, remaining: limit, resetAt: new Date(Date.now() + windowSec * 1000), limit };
+  }
+  if (userId && await isAdminUser(userId)) {
     return { ok: true, remaining: limit, resetAt: new Date(Date.now() + windowSec * 1000), limit };
   }
 

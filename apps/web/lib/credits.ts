@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { isAdminUser } from "./admin";
 
 export class InsufficientCreditsError extends Error {
   code = "NO_CREDITS" as const;
@@ -55,6 +56,7 @@ export function isReserved(balance: number): boolean {
 
 export async function getBalance(userId: string): Promise<number> {
   if (!creditsEnabled()) return 999;
+  if (await isAdminUser(userId)) return 999999;
   const row = await prisma.creditBalance.findUnique({ where: { userId } });
   return row?.balance ?? 0;
 }
@@ -164,6 +166,7 @@ export async function requireCredits(
   _action: string,
 ): Promise<void> {
   if (!creditsEnabled()) return;
+  if (await isAdminUser(userId)) return;
   const balance = await getBalance(userId);
   const reserve = getReserveMin();
   if (balance - cost < reserve) {
@@ -179,6 +182,7 @@ export async function requireAndDeductCredits(
   projectId?: string
 ): Promise<number> {
   if (!creditsEnabled()) return 999;
+  if (await isAdminUser(userId)) return 999999;
   return atomicDeduct(userId, cost, action, jobId, projectId);
 }
 

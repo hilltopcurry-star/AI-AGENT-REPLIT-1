@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { isAdminUser } from "./admin";
 
 export function getMaxConcurrentBuildsPerWorker(): number {
   return parseInt(process.env.MAX_CONCURRENT_BUILDS_PER_WORKER || "2", 10);
@@ -9,15 +10,18 @@ export async function enqueueBuild(
   projectId: string,
   jobId?: string
 ): Promise<{ queueJobId: string; position: number }> {
-  const running = await prisma.buildQueueJob.count({
-    where: { userId, status: "RUNNING" },
-  });
-  if (running >= 1) {
-    const queued = await prisma.buildQueueJob.count({
-      where: { userId, status: "QUEUED" },
+  const admin = await isAdminUser(userId);
+  if (!admin) {
+    const running = await prisma.buildQueueJob.count({
+      where: { userId, status: "RUNNING" },
     });
-    if (queued >= 5) {
-      throw new Error("Too many queued builds. Please wait for current builds to finish.");
+    if (running >= 1) {
+      const queued = await prisma.buildQueueJob.count({
+        where: { userId, status: "QUEUED" },
+      });
+      if (queued >= 5) {
+        throw new Error("Too many queued builds. Please wait for current builds to finish.");
+      }
     }
   }
 

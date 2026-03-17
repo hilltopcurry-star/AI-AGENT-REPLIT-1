@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { isAdminUser } from "./admin";
 
 export class AiQuotaExhaustedError extends Error {
   code = "AI_QUOTA_EXHAUSTED" as const;
@@ -17,6 +18,7 @@ export function aiQuotaEnabled(): boolean {
 
 export async function getAiQuota(userId: string): Promise<{ remainingRequests: number; remainingTokens: number }> {
   if (!aiQuotaEnabled()) return { remainingRequests: 9999, remainingTokens: 9999999 };
+  if (await isAdminUser(userId)) return { remainingRequests: 999999, remainingTokens: 99999999 };
   const row = await prisma.aiQuotaBalance.findUnique({ where: { userId } });
   return {
     remainingRequests: row?.remainingRequests ?? 0,
@@ -69,6 +71,7 @@ export async function deductAiQuotaAtomic(
   tokenCost: number
 ): Promise<{ remainingRequests: number; remainingTokens: number }> {
   if (!aiQuotaEnabled()) return { remainingRequests: 9999, remainingTokens: 9999999 };
+  if (await isAdminUser(userId)) return { remainingRequests: 999999, remainingTokens: 99999999 };
 
   return prisma.$transaction(async (tx) => {
     const bal = await tx.aiQuotaBalance.findUnique({ where: { userId } });

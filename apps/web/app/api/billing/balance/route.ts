@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getBalance, getLowThreshold, getReserveMin, creditsEnabled, ensureInitialCredits, isReserved } from "@/lib/credits";
+import { isAdminEmail } from "@/lib/admin";
 
 export async function GET() {
   const session = await auth();
@@ -8,8 +9,10 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const admin = isAdminEmail(session.user.email);
+
   if (!creditsEnabled()) {
-    return NextResponse.json({ balance: 999, enabled: false, low: false, reserved: false });
+    return NextResponse.json({ balance: 999, enabled: false, low: false, reserved: false, admin });
   }
 
   await ensureInitialCredits(session.user.id);
@@ -20,9 +23,10 @@ export async function GET() {
   return NextResponse.json({
     balance,
     enabled: true,
-    low: balance <= threshold,
-    reserved: isReserved(balance),
+    low: admin ? false : balance <= threshold,
+    reserved: admin ? false : isReserved(balance),
     reserveMin,
     threshold,
+    admin,
   });
 }

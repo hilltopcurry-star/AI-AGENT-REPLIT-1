@@ -12,6 +12,7 @@ interface BalanceData {
   low: boolean;
   reserved: boolean;
   reserveMin?: number;
+  admin?: boolean;
 }
 
 interface AiStatusData {
@@ -129,6 +130,7 @@ interface AiQuotaData {
   remainingTokens: number;
   low: boolean;
   exhausted: boolean;
+  admin?: boolean;
 }
 
 export function AiQuotaBadge() {
@@ -150,6 +152,18 @@ export function AiQuotaBadge() {
     if (n >= 1000) return `${(n / 1000).toFixed(0)}k`;
     return String(n);
   };
+
+  if (data.admin) {
+    return (
+      <div
+        className="flex items-center gap-1.5 text-xs font-medium text-emerald-500 px-2 py-1"
+        data-testid="button-ai-quota-badge"
+      >
+        <Zap className="h-3.5 w-3.5" />
+        <span data-testid="text-ai-quota">Owner Unlimited</span>
+      </div>
+    );
+  }
 
   return (
     <Button
@@ -185,6 +199,18 @@ export function CreditsBadge() {
 
   if (!data || !data.enabled) return null;
 
+  if (data.admin) {
+    return (
+      <div
+        className="flex items-center gap-1.5 text-xs font-medium text-emerald-500 px-2 py-1"
+        data-testid="button-credits-badge"
+      >
+        <Coins className="h-3.5 w-3.5" />
+        <span data-testid="text-credits-count">Owner Unlimited</span>
+      </div>
+    );
+  }
+
   const isReserved = data.reserved;
   const isZero = data.balance === 0;
   const isLow = data.low && !isReserved;
@@ -219,7 +245,7 @@ export function CreditsBanner() {
     refetchInterval: 30000,
   });
 
-  if (!data || !data.enabled) return null;
+  if (!data || !data.enabled || data.admin) return null;
 
   if (data.reserved) {
     return (

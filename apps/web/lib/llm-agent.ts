@@ -3,6 +3,7 @@ import { getMemory, cleanupExpiredMemory } from "./memory";
 import { getToolDefinitions, executeTool } from "./tools";
 import type { AgentInput, AgentResponse } from "./agent";
 import { aiQuotaEnabled, getAiQuota, deductAiQuotaAtomic, refundAiQuotaTokens, AiQuotaExhaustedError } from "./ai-quota";
+import { isAdminUser } from "./admin";
 
 export function isKillSwitchEnabled(): boolean {
   return process.env.OPENAI_KILL_SWITCH === "1";
@@ -49,6 +50,9 @@ export async function checkAiAvailability(userId: string): Promise<{
   }
   if (!hasOpenAiKey()) {
     return { available: false, reason: "no_key" };
+  }
+  if (await isAdminUser(userId)) {
+    return { available: true };
   }
   if (aiQuotaEnabled()) {
     const quota = await getAiQuota(userId);
