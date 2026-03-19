@@ -68,6 +68,7 @@ export function ConsolePanel({ projectId, activeJobId }: ConsolePanelProps) {
     setStreamingLogs([]);
     setJobStatus(null);
     setDeploymentUrl(null);
+    setDeploymentProvider(null);
     seenIdsRef.current = new Set();
 
     const eventSource = new EventSource(`/api/jobs/${currentJobId}/logs`);
@@ -262,7 +263,7 @@ export function ConsolePanel({ projectId, activeJobId }: ConsolePanelProps) {
           {deploymentUrl && (
             <div className="flex items-center gap-2 text-xs text-emerald-400 font-mono mt-1">
               <span data-testid="text-deployment-url">
-                {deploymentProvider === "fly" ? "🚀 Live URL" : "Live URL"}:{" "}
+                {deploymentProvider === "fly" ? "Fly (Production)" : "Live URL"}:{" "}
                 <a
                   href={deploymentUrl}
                   target="_blank"

@@ -70,19 +70,21 @@ export async function GET(
 
             const flyDep = await prisma.flyDeployment.findFirst({
               where: { queueJobId, status: "SUCCESS" },
-              select: { url: true },
+              select: { id: true, url: true },
             });
             if (flyDep?.url) {
               doneData.deploymentUrl = flyDep.url;
               doneData.deploymentProvider = "fly";
+              doneData.deploymentId = flyDep.id;
             } else if (current.jobId) {
               const dep = await prisma.deployment.findUnique({
                 where: { jobId: current.jobId },
-                select: { url: true, status: true },
+                select: { id: true, url: true, status: true },
               });
               if (dep?.status === "SUCCESS" && dep.url) {
                 doneData.deploymentUrl = dep.url;
                 doneData.deploymentProvider = "replit-proxy";
+                doneData.deploymentId = dep.id;
               }
             }
 

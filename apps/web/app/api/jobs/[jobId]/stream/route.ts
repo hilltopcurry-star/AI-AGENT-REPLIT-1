@@ -115,7 +115,7 @@ export async function GET(
                 ? await prisma.flyDeployment.findFirst({
                     where: { projectId: job.projectId, status: "SUCCESS" },
                     orderBy: { createdAt: "desc" },
-                    select: { url: true },
+                    select: { id: true, url: true },
                   })
                 : null;
 
@@ -133,6 +133,7 @@ export async function GET(
               if (flyDep?.url) {
                 donePayload.deploymentUrl = flyDep.url;
                 donePayload.deploymentProvider = "fly";
+                donePayload.deploymentId = flyDep.id;
                 if (deployment?.status === "SUCCESS" && deployment.url) {
                   donePayload.proxyUrl = deployment.url;
                 }
