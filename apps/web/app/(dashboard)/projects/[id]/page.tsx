@@ -14,7 +14,7 @@ import {
   Terminal,
   Database,
 } from "lucide-react";
-import { CreditsBadge, CreditsBanner, AiStatusBadge, AiQuotaBadge } from "@/components/credits-badge";
+import { CreditsBadge, CreditsBanner, AiStatusBadge, AiQuotaBadge, PlanBadge } from "@/components/credits-badge";
 
 interface Project {
   id: string;
@@ -117,6 +117,7 @@ export default function WorkspacePage({
                 Database
               </TabsTrigger>
             </TabsList>
+            <PlanBadge />
             <AiStatusBadge />
             <AiQuotaBadge />
             <CreditsBadge />

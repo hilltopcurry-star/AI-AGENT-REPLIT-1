@@ -229,6 +229,19 @@ package.json
 7. **Contract**: Mock-agent logs use `[MOCK]` prefix (product behavior). `[RUNNER]`/`[DEPLOY]` patterns are ONLY in `createCompletedJob()` fixtures for test assertions.
 8. **Verified**: 564 tests, 0 failures (Batch 1: 285 DB-only, Batch 2: 279 API).
 
+## Phase-5 Changes (2026-03-19)
+
+### Plans + Limits + Autoscale Foundation
+1. **Prisma models**: `Subscription` (userId unique, planKey, status, currentPeriodEnd, stripeCustomerId, stripeSubscriptionId), `PlanConfig` (planKey unique PK, maxRunningBuilds, maxQueuedBuilds, maxAiRequestsPerMonth, maxAiTokensPerMonth, maxDeploysPerDay, priority)
+2. **Core library** (`lib/plans.ts`): `getUserPlan()` (cached 60s), `getLimits()` (admin → unlimited), `getLimitsByPlan()`, `setUserPlan()`, `isOwnerUnlimited()`, `PLAN_DISPLAY`. Three tiers: basic (free), pro ($29/mo), enterprise ($99/mo).
+3. **Enforcement**:
+   - **build-queue.ts**: Plan-based `maxRunningBuilds` + `maxQueuedBuilds` (basic: 1/3, pro: 3/10, enterprise: 10/50). Priority set by plan (0/10/20). Friendly error with "Upgrade" mention.
+   - **rate-limit.ts**: Plan-based multiplier (basic: 1x, pro: 3x, enterprise: 10x) on rate limits.
+   - **Admin bypass**: All limits bypassed for admin users.
+4. **API routes**: `GET/POST /api/billing/plan` (view/change plan), admin stats extended with planCounts, queueByPlan, topUsersByBuilds, topUsersByAi, MRR placeholder.
+5. **UI**: Billing page with plan cards (Basic/Pro/Enterprise) + upgrade buttons + plan limits display. `PlanBadge` component in headers. Admin dashboard with plan distribution, queue by plan, top users, MRR card.
+6. **Tests**: 19 new tests (565–583) covering plan defaults, upgrade/downgrade, queue enforcement with plan limits, subscription model, PlanConfig model, admin stats plan data.
+
 ## Database Schema (Prisma)
 - **User** (id, name, email, emailVerified, image)
 - **Account** (NextAuth standard)
@@ -244,6 +257,8 @@ package.json
 - **MemoryItem** (id, userId, projectId?, scope, key, value, createdAt, expiresAt) — 90-day TTL, @@unique([userId, projectId, scope, key])
 - **OpenAiUsage** (id, userId, date, requests, tokens) — @@unique([userId, date])
 - **RateLimitBucket** (id, userId?, ip?, key, windowStart, windowSec, count) — @@unique([userId, ip, key, windowStart])
+- **Subscription** (id, userId unique, planKey, status, currentPeriodEnd?, stripeCustomerId?, stripeSubscriptionId?) — relation to User
+- **PlanConfig** (planKey PK unique, maxRunningBuilds, maxQueuedBuilds, maxAiRequestsPerMonth, maxAiTokensPerMonth, maxDeploysPerDay, priority)
 
 ## Environment Variables (Required)
 - `DATABASE_URL` — PostgreSQL connection string

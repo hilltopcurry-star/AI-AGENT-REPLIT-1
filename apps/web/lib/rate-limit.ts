@@ -1,6 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { isAdminUser } from "./admin";
+import { getUserPlan, type PlanKey } from "./plans";
+
+const PLAN_RATE_MULTIPLIERS: Record<PlanKey, number> = {
+  basic: 1,
+  pro: 3,
+  enterprise: 10,
+};
 
 interface RateLimitParams {
   userId?: string | null;
@@ -43,6 +50,12 @@ export async function rateLimit({
   }
   if (userId && await isAdminUser(userId)) {
     return { ok: true, remaining: limit, resetAt: new Date(Date.now() + windowSec * 1000), limit };
+  }
+
+  if (userId) {
+    const plan = await getUserPlan(userId);
+    const mult = PLAN_RATE_MULTIPLIERS[plan] ?? 1;
+    limit = Math.ceil(limit * mult);
   }
 
   const windowStart = getWindowStart(windowSec);

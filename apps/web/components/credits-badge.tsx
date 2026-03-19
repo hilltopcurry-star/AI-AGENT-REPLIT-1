@@ -2,7 +2,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { Coins, Zap, ZapOff } from "lucide-react";
+import { Coins, Zap, ZapOff, Shield, Crown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useCallback, useEffect, useState } from "react";
 
@@ -232,6 +232,53 @@ export function CreditsBadge() {
       <Coins className="h-3.5 w-3.5" />
       <span data-testid="text-credits-count">{data.balance}</span>
       {(isZero || isReserved) && <span className="text-[10px]">Add credits</span>}
+    </Button>
+  );
+}
+
+interface PlanBadgeData {
+  planKey: string;
+  admin: boolean;
+  display: { label: string; color: string; price: string };
+}
+
+export function PlanBadge() {
+  const router = useRouter();
+
+  const { data } = useQuery<PlanBadgeData>({
+    queryKey: ["/api/billing/plan"],
+    queryFn: () => fetch("/api/billing/plan").then((r) => r.json()),
+    refetchInterval: 60000,
+  });
+
+  if (!data) return null;
+
+  if (data.admin) {
+    return (
+      <div
+        className="flex items-center gap-1.5 text-xs font-medium text-emerald-500 px-2 py-1"
+        data-testid="badge-plan"
+      >
+        <Shield className="h-3.5 w-3.5" />
+        <span data-testid="text-plan-name">Owner</span>
+      </div>
+    );
+  }
+
+  const icon = data.planKey === "enterprise" ? Shield : data.planKey === "pro" ? Crown : Zap;
+  const Icon = icon;
+  const colorCls = data.planKey === "enterprise" ? "text-violet-500" : data.planKey === "pro" ? "text-blue-500" : "text-muted-foreground";
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => router.push("/billing")}
+      data-testid="badge-plan"
+      className={`gap-1.5 text-xs font-medium ${colorCls} hover:text-foreground`}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      <span data-testid="text-plan-name">{data.display.label}</span>
     </Button>
   );
 }

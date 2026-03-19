@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { isAdminUser } from "./admin";
+import { getLimits } from "./plans";
 
 export function getMaxConcurrentBuildsPerWorker(): number {
   return parseInt(process.env.MAX_CONCURRENT_BUILDS_PER_WORKER || "2", 10);
@@ -11,16 +12,21 @@ export async function enqueueBuild(
   jobId?: string
 ): Promise<{ queueJobId: string; position: number }> {
   const admin = await isAdminUser(userId);
+  const limits = await getLimits(userId);
+
   if (!admin) {
     const running = await prisma.buildQueueJob.count({
       where: { userId, status: "RUNNING" },
     });
-    if (running >= 1) {
+    if (running >= limits.maxRunningBuilds) {
       const queued = await prisma.buildQueueJob.count({
         where: { userId, status: "QUEUED" },
       });
-      if (queued >= 5) {
-        throw new Error("Too many queued builds. Please wait for current builds to finish.");
+      if (queued >= limits.maxQueuedBuilds) {
+        throw new Error(
+          `Queue limit reached (${limits.maxQueuedBuilds} queued, ${limits.maxRunningBuilds} running). ` +
+          `Upgrade your plan for higher limits.`
+        );
       }
     }
   }
@@ -31,6 +37,7 @@ export async function enqueueBuild(
       projectId,
       jobId,
       status: "QUEUED",
+      priority: limits.priority,
     },
   });
 

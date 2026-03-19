@@ -20,6 +20,11 @@ import {
   ExternalLink,
   Copy,
   Check,
+  DollarSign,
+  Crown,
+  Shield,
+  Zap,
+  BarChart3,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -36,6 +41,15 @@ interface QueueJob {
   lockedBy: string | null;
 }
 
+interface TopUser {
+  userId: string;
+  email: string | null;
+  name: string | null;
+  builds?: number;
+  requests?: number;
+  tokens?: number;
+}
+
 interface AdminStats {
   totalUsers: number;
   totalProjects: number;
@@ -49,6 +63,11 @@ interface AdminStats {
   recentQueueJobs: QueueJob[];
   creditsSold: number;
   aiQuotaSold: { requests: number; tokens: number };
+  planCounts: Record<string, number>;
+  queueByPlan: Record<string, { queued: number; running: number }>;
+  topUsersByBuilds: TopUser[];
+  topUsersByAi: TopUser[];
+  mrr: { placeholder: boolean; estimated: number };
 }
 
 function StatusIcon({ status }: { status: string }) {
@@ -128,6 +147,12 @@ function QueueJobRow({ job }: { job: QueueJob }) {
   );
 }
 
+function formatTokens(n: number) {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(0)}k`;
+  return String(n);
+}
+
 export default function AdminPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -186,7 +211,7 @@ export default function AdminPage() {
           <div className="text-center text-muted-foreground py-12">Loading stats...</div>
         ) : (
           <>
-            <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5 mb-8">
+            <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6 mb-8">
               <Card data-testid="card-total-users">
                 <CardHeader className="pb-2">
                   <CardDescription className="flex items-center gap-1"><Users className="h-3.5 w-3.5" /> Users</CardDescription>
@@ -223,9 +248,93 @@ export default function AdminPage() {
 
               <Card data-testid="card-ai-quota-sold">
                 <CardHeader className="pb-2">
-                  <CardDescription className="flex items-center gap-1"><Brain className="h-3.5 w-3.5" /> AI Quota Sold</CardDescription>
+                  <CardDescription className="flex items-center gap-1"><Brain className="h-3.5 w-3.5" /> AI Sold</CardDescription>
                   <CardTitle className="text-lg">{data.aiQuotaSold.requests} req</CardTitle>
                 </CardHeader>
+              </Card>
+
+              <Card data-testid="card-mrr">
+                <CardHeader className="pb-2">
+                  <CardDescription className="flex items-center gap-1"><DollarSign className="h-3.5 w-3.5" /> Est. MRR</CardDescription>
+                  <CardTitle className="text-2xl" data-testid="text-mrr">${data.mrr.estimated}</CardTitle>
+                  {data.mrr.placeholder && <span className="text-[10px] text-muted-foreground">placeholder</span>}
+                </CardHeader>
+              </Card>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2 mb-8">
+              <Card data-testid="card-plan-distribution">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <BarChart3 className="h-4 w-4" />
+                    Active Plans
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {[
+                      { key: "basic", label: "Basic", icon: Zap, color: "text-muted-foreground" },
+                      { key: "pro", label: "Pro", icon: Crown, color: "text-blue-500" },
+                      { key: "enterprise", label: "Enterprise", icon: Shield, color: "text-violet-500" },
+                    ].map(({ key, label, icon: Icon, color }) => (
+                      <div key={key} className="flex items-center justify-between">
+                        <div className={`flex items-center gap-2 text-sm ${color}`}>
+                          <Icon className="h-4 w-4" />
+                          {label}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-sm font-bold" data-testid={`text-plan-count-${key}`}>
+                            {data.planCounts[key] || 0}
+                          </span>
+                          {data.queueByPlan[key] && (
+                            <span className="text-[10px] text-muted-foreground">
+                              ({data.queueByPlan[key].queued}Q/{data.queueByPlan[key].running}R)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card data-testid="card-top-users">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    Top Users
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1.5">
+                    <div className="text-xs text-muted-foreground font-medium mb-2">By Builds</div>
+                    {data.topUsersByBuilds.length === 0 ? (
+                      <div className="text-xs text-muted-foreground">No data</div>
+                    ) : (
+                      data.topUsersByBuilds.map((u, i) => (
+                        <div key={u.userId} className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground truncate max-w-[200px]">
+                            {i + 1}. {u.email || u.name || u.userId.slice(0, 8)}
+                          </span>
+                          <span className="font-mono font-bold">{u.builds}</span>
+                        </div>
+                      ))
+                    )}
+                    <div className="text-xs text-muted-foreground font-medium mt-3 mb-2">By AI Usage</div>
+                    {data.topUsersByAi.length === 0 ? (
+                      <div className="text-xs text-muted-foreground">No data</div>
+                    ) : (
+                      data.topUsersByAi.map((u, i) => (
+                        <div key={u.userId} className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground truncate max-w-[200px]">
+                            {i + 1}. {u.email || u.name || u.userId.slice(0, 8)}
+                          </span>
+                          <span className="font-mono font-bold">{u.requests} req / {formatTokens(u.tokens || 0)} tok</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </CardContent>
               </Card>
             </div>
 
@@ -236,7 +345,7 @@ export default function AdminPage() {
                   No queue jobs yet
                 </div>
               ) : (
-                <div className="border rounded-lg overflow-hidden">
+                <div className="border rounded-lg overflow-hidden overflow-x-auto">
                   <table className="w-full text-sm" data-testid="table-queue-jobs">
                     <thead>
                       <tr className="border-b bg-muted/50">

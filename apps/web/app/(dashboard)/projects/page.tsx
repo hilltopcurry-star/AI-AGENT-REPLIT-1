@@ -18,7 +18,7 @@ import {
   Sun,
 } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
-import { CreditsBadge, AiStatusBadge, AiQuotaBadge } from "@/components/credits-badge";
+import { CreditsBadge, AiStatusBadge, AiQuotaBadge, PlanBadge } from "@/components/credits-badge";
 import { useEffect } from "react";
 
 interface Project {
@@ -75,6 +75,7 @@ export default function ProjectsPage() {
           <span className="text-lg font-bold text-foreground">AI Workspace</span>
         </div>
         <div className="flex items-center gap-3">
+          <PlanBadge />
           <AiStatusBadge />
           <AiQuotaBadge />
           <CreditsBadge />

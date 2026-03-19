@@ -15,6 +15,9 @@ import {
   Zap,
   TrendingUp,
   Brain,
+  Shield,
+  Crown,
+  CheckCircle,
 } from "lucide-react";
 import { useEffect } from "react";
 
@@ -31,6 +34,20 @@ interface AiQuotaData {
   remainingTokens: number;
   low: boolean;
   exhausted: boolean;
+}
+
+interface PlanData {
+  planKey: string;
+  admin: boolean;
+  limits: {
+    maxRunningBuilds: number;
+    maxQueuedBuilds: number;
+    maxAiRequestsPerMonth: number;
+    maxAiTokensPerMonth: number;
+    maxDeploysPerDay: number;
+    priority: number;
+  };
+  display: { label: string; color: string; price: string };
 }
 
 interface LedgerEntry {
@@ -56,6 +73,33 @@ function formatTokens(n: number) {
   return String(n);
 }
 
+const PLANS = [
+  {
+    key: "basic",
+    label: "Basic",
+    price: "Free",
+    icon: Zap,
+    color: "border-border",
+    features: ["1 concurrent build", "3 queued builds", "50 AI requests/mo", "3 deploys/day"],
+  },
+  {
+    key: "pro",
+    label: "Pro",
+    price: "$29/mo",
+    icon: Crown,
+    color: "border-blue-500",
+    features: ["3 concurrent builds", "10 queued builds", "500 AI requests/mo", "20 deploys/day", "3x rate limits", "Priority queue"],
+  },
+  {
+    key: "enterprise",
+    label: "Enterprise",
+    price: "$99/mo",
+    icon: Shield,
+    color: "border-violet-500",
+    features: ["10 concurrent builds", "50 queued builds", "5,000 AI requests/mo", "100 deploys/day", "10x rate limits", "Highest priority"],
+  },
+];
+
 export default function BillingPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -73,6 +117,12 @@ export default function BillingPage() {
   const { data: aiQuotaData, isLoading: aiQuotaLoading } = useQuery<AiQuotaData>({
     queryKey: ["/api/ai/quota"],
     queryFn: () => fetch("/api/ai/quota").then((r) => r.json()),
+    enabled: !!session,
+  });
+
+  const { data: planData, isLoading: planLoading } = useQuery<PlanData>({
+    queryKey: ["/api/billing/plan"],
+    queryFn: () => fetch("/api/billing/plan").then((r) => r.json()),
     enabled: !!session,
   });
 
@@ -115,6 +165,18 @@ export default function BillingPage() {
     },
   });
 
+  const upgradeMut = useMutation({
+    mutationFn: (planKey: string) =>
+      fetch("/api/billing/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planKey }),
+      }).then((r) => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/plan"] });
+    },
+  });
+
   if (status === "loading" || status === "unauthenticated") {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
@@ -128,6 +190,8 @@ export default function BillingPage() {
   const aiReqs = aiQuotaData?.remainingRequests ?? 0;
   const aiTokens = aiQuotaData?.remainingTokens ?? 0;
   const aiEnabled = aiQuotaData?.enabled ?? false;
+  const currentPlan = planData?.planKey || "basic";
+  const isAdmin = planData?.admin ?? false;
 
   return (
     <div className="min-h-screen bg-background">
@@ -148,15 +212,104 @@ export default function BillingPage() {
         </Button>
       </header>
 
-      <main className="max-w-4xl mx-auto px-6 py-8">
+      <main className="max-w-5xl mx-auto px-6 py-8">
         <div className="flex items-center gap-3 mb-8">
           <CreditCard className="h-7 w-7 text-primary" />
           <h1 className="text-2xl font-bold text-foreground" data-testid="text-billing-heading">
-            Billing & Credits
+            Billing & Plans
           </h1>
         </div>
 
-        <div className={`grid gap-6 ${aiEnabled ? "md:grid-cols-3" : "md:grid-cols-2"} mb-8`}>
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Shield className="h-5 w-5" />
+            Your Plan
+          </h2>
+          {planLoading ? (
+            <div className="text-sm text-muted-foreground py-4 text-center">Loading plan...</div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-3">
+              {PLANS.map((plan) => {
+                const isCurrent = currentPlan === plan.key;
+                const canUpgrade = !isAdmin && !isCurrent && PLANS.findIndex((p) => p.key === plan.key) > PLANS.findIndex((p) => p.key === currentPlan);
+                const Icon = plan.icon;
+
+                return (
+                  <Card
+                    key={plan.key}
+                    className={`relative ${isCurrent ? `${plan.color} border-2` : "border"}`}
+                    data-testid={`card-plan-${plan.key}`}
+                  >
+                    {isCurrent && (
+                      <div className="absolute -top-3 left-4 bg-primary text-primary-foreground text-[10px] font-bold px-2 py-0.5 rounded-full" data-testid="badge-current-plan">
+                        CURRENT
+                      </div>
+                    )}
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <Icon className="h-5 w-5" />
+                        {plan.label}
+                      </CardTitle>
+                      <CardDescription className="text-lg font-bold">{plan.price}</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-1.5 text-xs text-muted-foreground mb-4">
+                        {plan.features.map((f) => (
+                          <li key={f} className="flex items-center gap-1.5">
+                            <CheckCircle className="h-3 w-3 text-emerald-500 shrink-0" />
+                            {f}
+                          </li>
+                        ))}
+                      </ul>
+                      {isAdmin ? (
+                        <div className="text-xs text-emerald-500 font-medium text-center">
+                          Owner Unlimited
+                        </div>
+                      ) : canUpgrade ? (
+                        <Button
+                          className="w-full"
+                          size="sm"
+                          onClick={() => upgradeMut.mutate(plan.key)}
+                          disabled={upgradeMut.isPending}
+                          data-testid={`button-upgrade-${plan.key}`}
+                        >
+                          {upgradeMut.isPending ? "Upgrading..." : `Upgrade to ${plan.label}`}
+                        </Button>
+                      ) : isCurrent ? (
+                        <div className="text-xs text-center text-muted-foreground">Active</div>
+                      ) : null}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {planData && !isAdmin && (
+          <div className="mb-8">
+            <h2 className="text-lg font-semibold mb-4">Plan Limits</h2>
+            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+              {[
+                { label: "Running Builds", value: planData.limits.maxRunningBuilds },
+                { label: "Queued Builds", value: planData.limits.maxQueuedBuilds },
+                { label: "AI Requests/mo", value: planData.limits.maxAiRequestsPerMonth },
+                { label: "AI Tokens/mo", value: formatTokens(planData.limits.maxAiTokensPerMonth) },
+                { label: "Deploys/day", value: planData.limits.maxDeploysPerDay },
+                { label: "Queue Priority", value: planData.limits.priority },
+              ].map((item) => (
+                <div key={item.label} className="border rounded-lg p-3 flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">{item.label}</span>
+                  <span className="text-sm font-mono font-bold" data-testid={`text-limit-${item.label.toLowerCase().replace(/[^a-z]/g, "-")}`}>
+                    {item.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className={`grid gap-6 ${aiEnabled ? "md:grid-cols-2" : "md:grid-cols-1"} mb-8`}>
           <Card data-testid="card-balance">
             <CardHeader>
               <CardDescription>Build Credits</CardDescription>
@@ -210,30 +363,10 @@ export default function BillingPage() {
                     <span>Tokens remaining</span>
                     <span className="font-mono" data-testid="text-ai-quota-tokens">{formatTokens(aiTokens)}</span>
                   </div>
-                  {aiQuotaData?.exhausted && (
-                    <div className="rounded bg-orange-500/10 border border-orange-500/20 p-1.5 mt-2 text-center text-orange-500 font-medium">
-                      AI quota exhausted — chat continues in Basic Mode
-                    </div>
-                  )}
                 </div>
               </CardContent>
             </Card>
           )}
-
-          <Card data-testid="card-plan">
-            <CardHeader>
-              <CardDescription>Current Plan</CardDescription>
-              <CardTitle className="flex items-center gap-2">
-                <Zap className="h-5 w-5 text-primary" />
-                Developer
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Pay-as-you-go credits + AI quota. Welcome bonus on signup.
-              </p>
-            </CardContent>
-          </Card>
         </div>
 
         <div className="mb-8">
