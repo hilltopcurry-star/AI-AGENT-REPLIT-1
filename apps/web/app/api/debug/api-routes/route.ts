@@ -17,6 +17,7 @@ const EXPECTED_ROUTES = [
   "/api/agent-mode",
   "/api/debug-routes",
   "/api/debug/api-routes",
+  "/api/debug/fly",
   "/api/stripe/checkout",
   "/api/stripe/webhook",
   "/api/stripe/portal",

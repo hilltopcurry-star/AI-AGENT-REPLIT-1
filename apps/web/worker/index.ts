@@ -194,7 +194,9 @@ async function processQueueJob(queueJob: {
     });
     await log(jobId, "INFO", "[WORKER] BuildArtifact saved");
 
-    await log(jobId, "INFO", "[WORKER] Attempting Fly.io deployment...");
+    const flyTokenPresent = !!(process.env.FLY_API_TOKEN);
+    await log(jobId, "INFO", `[DEPLOY] flyTokenPresent=${flyTokenPresent}`);
+    await log(jobId, "INFO", "[DEPLOY] attempting fly deploy...");
     const { deployToFly } = await import("../lib/fly-deployer");
     const flyResult = await deployToFly({
       queueJobId,
