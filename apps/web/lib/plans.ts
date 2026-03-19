@@ -59,12 +59,26 @@ export async function getUserPlan(userId: string): Promise<PlanKey> {
     select: { planKey: true, status: true },
   });
 
-  const plan: PlanKey = (sub && sub.status === "active" && isValidPlanKey(sub.planKey))
-    ? sub.planKey
-    : "basic";
+  const plan: PlanKey =
+    sub && (sub.status === "active" || sub.status === "past_due") && isValidPlanKey(sub.planKey)
+      ? sub.planKey
+      : "basic";
 
   planCache.set(userId, { plan, ts: Date.now() });
   return plan;
+}
+
+export async function getUserSubscription(userId: string) {
+  return prisma.subscription.findUnique({
+    where: { userId },
+    select: {
+      planKey: true,
+      status: true,
+      stripeCustomerId: true,
+      stripeSubscriptionId: true,
+      currentPeriodEnd: true,
+    },
+  });
 }
 
 export async function getLimits(userId: string): Promise<PlanLimits> {

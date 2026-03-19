@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
 import { Button } from "@/components/ui/button";
@@ -18,8 +18,10 @@ import {
   Shield,
   Crown,
   CheckCircle,
+  ExternalLink,
+  AlertCircle,
 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 interface BalanceData {
   balance: number;
@@ -39,6 +41,7 @@ interface AiQuotaData {
 interface PlanData {
   planKey: string;
   admin: boolean;
+  stripeEnabled: boolean;
   limits: {
     maxRunningBuilds: number;
     maxQueuedBuilds: number;
@@ -48,6 +51,11 @@ interface PlanData {
     priority: number;
   };
   display: { label: string; color: string; price: string };
+  subscription?: {
+    status: string;
+    hasStripeSubscription: boolean;
+    currentPeriodEnd: string | null;
+  } | null;
 }
 
 interface LedgerEntry {
@@ -103,10 +111,21 @@ const PLANS = [
 export default function BillingPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/");
   }, [status, router]);
+
+  useEffect(() => {
+    if (searchParams.get("success") === "1") {
+      setSuccessMsg("Subscription activated! Your plan has been upgraded.");
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/plan"] });
+    } else if (searchParams.get("canceled") === "1") {
+      setSuccessMsg("Checkout was canceled. No changes were made.");
+    }
+  }, [searchParams]);
 
   const { data: balanceData, isLoading: balLoading } = useQuery<BalanceData>({
     queryKey: ["/api/billing/balance"],
@@ -177,6 +196,36 @@ export default function BillingPage() {
     },
   });
 
+  const stripeCheckoutMut = useMutation({
+    mutationFn: async (planKey: string) => {
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planKey }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Checkout failed");
+      return data;
+    },
+    onSuccess: (data) => {
+      if (data.url) window.location.href = data.url;
+    },
+  });
+
+  const stripePortalMut = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/stripe/portal", {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Portal failed");
+      return data;
+    },
+    onSuccess: (data) => {
+      if (data.url) window.location.href = data.url;
+    },
+  });
+
   if (status === "loading" || status === "unauthenticated") {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
@@ -192,6 +241,9 @@ export default function BillingPage() {
   const aiEnabled = aiQuotaData?.enabled ?? false;
   const currentPlan = planData?.planKey || "basic";
   const isAdmin = planData?.admin ?? false;
+  const useStripe = planData?.stripeEnabled ?? false;
+  const hasStripeSubscription = planData?.subscription?.hasStripeSubscription ?? false;
+  const subStatus = planData?.subscription?.status;
 
   return (
     <div className="min-h-screen bg-background">
@@ -220,18 +272,48 @@ export default function BillingPage() {
           </h1>
         </div>
 
+        {successMsg && (
+          <div className="mb-6 flex items-center gap-2 border rounded-lg p-4 bg-emerald-500/5 border-emerald-500/30 text-sm" data-testid="text-checkout-message">
+            <CheckCircle className="h-5 w-5 text-emerald-500 shrink-0" />
+            <span>{successMsg}</span>
+            <button className="ml-auto text-muted-foreground hover:text-foreground" onClick={() => setSuccessMsg(null)}>×</button>
+          </div>
+        )}
+
+        {subStatus === "past_due" && (
+          <div className="mb-6 flex items-center gap-2 border rounded-lg p-4 bg-yellow-500/5 border-yellow-500/30 text-sm">
+            <AlertCircle className="h-5 w-5 text-yellow-500 shrink-0" />
+            <span>Your subscription payment is past due. Please update your payment method to avoid losing access to paid features.</span>
+            {hasStripeSubscription && (
+              <Button size="sm" variant="outline" className="ml-auto shrink-0" onClick={() => stripePortalMut.mutate()} disabled={stripePortalMut.isPending} data-testid="button-update-payment">
+                Update Payment
+              </Button>
+            )}
+          </div>
+        )}
+
         <div className="mb-8">
-          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Shield className="h-5 w-5" />
-            Your Plan
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <Shield className="h-5 w-5" />
+              Your Plan
+            </h2>
+            {hasStripeSubscription && !isAdmin && (
+              <Button variant="outline" size="sm" className="gap-1" onClick={() => stripePortalMut.mutate()} disabled={stripePortalMut.isPending} data-testid="button-manage-subscription">
+                <ExternalLink className="h-3.5 w-3.5" />
+                Manage Subscription
+              </Button>
+            )}
+          </div>
           {planLoading ? (
             <div className="text-sm text-muted-foreground py-4 text-center">Loading plan...</div>
           ) : (
             <div className="grid gap-4 md:grid-cols-3">
               {PLANS.map((plan) => {
                 const isCurrent = currentPlan === plan.key;
-                const canUpgrade = !isAdmin && !isCurrent && PLANS.findIndex((p) => p.key === plan.key) > PLANS.findIndex((p) => p.key === currentPlan);
+                const planIdx = PLANS.findIndex((p) => p.key === plan.key);
+                const currentIdx = PLANS.findIndex((p) => p.key === currentPlan);
+                const canUpgrade = !isAdmin && !isCurrent && planIdx > currentIdx;
                 const Icon = plan.icon;
 
                 return (
@@ -266,15 +348,27 @@ export default function BillingPage() {
                           Owner Unlimited
                         </div>
                       ) : canUpgrade ? (
-                        <Button
-                          className="w-full"
-                          size="sm"
-                          onClick={() => upgradeMut.mutate(plan.key)}
-                          disabled={upgradeMut.isPending}
-                          data-testid={`button-upgrade-${plan.key}`}
-                        >
-                          {upgradeMut.isPending ? "Upgrading..." : `Upgrade to ${plan.label}`}
-                        </Button>
+                        useStripe ? (
+                          <Button
+                            className="w-full"
+                            size="sm"
+                            onClick={() => stripeCheckoutMut.mutate(plan.key)}
+                            disabled={stripeCheckoutMut.isPending}
+                            data-testid={`button-upgrade-${plan.key}`}
+                          >
+                            {stripeCheckoutMut.isPending ? "Redirecting..." : `Upgrade to ${plan.label}`}
+                          </Button>
+                        ) : (
+                          <Button
+                            className="w-full"
+                            size="sm"
+                            onClick={() => upgradeMut.mutate(plan.key)}
+                            disabled={upgradeMut.isPending}
+                            data-testid={`button-upgrade-${plan.key}`}
+                          >
+                            {upgradeMut.isPending ? "Upgrading..." : `Upgrade to ${plan.label}`}
+                          </Button>
+                        )
                       ) : isCurrent ? (
                         <div className="text-xs text-center text-muted-foreground">Active</div>
                       ) : null}
@@ -369,46 +463,48 @@ export default function BillingPage() {
           )}
         </div>
 
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Plus className="h-5 w-5" />
-            Add Build Credits
-          </h2>
-          <div className="grid gap-4 sm:grid-cols-3">
-            {[
-              { amount: 20, label: "Starter", price: "$2" },
-              { amount: 50, label: "Builder", price: "$5" },
-              { amount: 100, label: "Pro", price: "$10" },
-            ].map((pkg) => (
-              <Card
-                key={pkg.amount}
-                className="cursor-pointer hover:border-primary/50 transition-colors"
-              >
-                <CardHeader>
-                  <CardTitle className="text-base">{pkg.label}</CardTitle>
-                  <CardDescription>{pkg.amount} credits</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button
-                    className="w-full gap-2"
-                    variant={pkg.amount === 50 ? "default" : "outline"}
-                    onClick={() => addCreditsMut.mutate(pkg.amount)}
-                    disabled={addCreditsMut.isPending}
-                    data-testid={`button-add-${pkg.amount}-credits`}
-                  >
-                    <TrendingUp className="h-4 w-4" />
-                    {addCreditsMut.isPending ? "Adding..." : `Add ${pkg.amount} credits`}
-                  </Button>
-                  <p className="text-xs text-muted-foreground text-center mt-2">
-                    +2 bonus credits · DEV MODE (mock)
-                  </p>
-                </CardContent>
-              </Card>
-            ))}
+        {!useStripe && (
+          <div className="mb-8">
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Plus className="h-5 w-5" />
+              Add Build Credits
+            </h2>
+            <div className="grid gap-4 sm:grid-cols-3">
+              {[
+                { amount: 20, label: "Starter", price: "$2" },
+                { amount: 50, label: "Builder", price: "$5" },
+                { amount: 100, label: "Pro", price: "$10" },
+              ].map((pkg) => (
+                <Card
+                  key={pkg.amount}
+                  className="cursor-pointer hover:border-primary/50 transition-colors"
+                >
+                  <CardHeader>
+                    <CardTitle className="text-base">{pkg.label}</CardTitle>
+                    <CardDescription>{pkg.amount} credits</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Button
+                      className="w-full gap-2"
+                      variant={pkg.amount === 50 ? "default" : "outline"}
+                      onClick={() => addCreditsMut.mutate(pkg.amount)}
+                      disabled={addCreditsMut.isPending}
+                      data-testid={`button-add-${pkg.amount}-credits`}
+                    >
+                      <TrendingUp className="h-4 w-4" />
+                      {addCreditsMut.isPending ? "Adding..." : `Add ${pkg.amount} credits`}
+                    </Button>
+                    <p className="text-xs text-muted-foreground text-center mt-2">
+                      +2 bonus credits · DEV MODE (mock)
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
-        {aiEnabled && (
+        {aiEnabled && !useStripe && (
           <div className="mb-8">
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <Brain className="h-5 w-5" />

@@ -1,0 +1,64 @@
+Implement Stripe subscriptions (Phase-B) for plan-based billing: Basic/Pro/Enterprise.
+
+Non‑negotiables:
+- Owner/admin (ADMIN_EMAILS) stays unlimited forever (no Stripe required, no limits).
+- Chat never hard-stops; if payment fails/past_due, builds/deploys can be blocked but chat continues with guidance.
+- No new workspace tabs (Chat/Console/Database only). Billing page can be /billing.
+- Use Stripe TEST mode first (staging). No mock purchases in production mode.
+
+1) Env vars (ask user only for values)
+STRIPE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET
+STRIPE_PRICE_ID_BASIC
+STRIPE_PRICE_ID_PRO
+STRIPE_PRICE_ID_ENTERPRISE
+NEXTAUTH_URL already set.
+
+2) Data model
+Use existing Subscription model (or adjust minimally) to store:
+userId (unique)
+planKey (basic|pro|enterprise)
+status (active|past_due|canceled)
+stripeCustomerId
+stripeSubscriptionId
+currentPeriodEnd
+
+3) Checkout flow
+Add API route:
+POST /api/stripe/checkout
+body: { planKey }
+- creates/reuses Stripe customer for user
+- creates Stripe Checkout Session (subscription mode) using correct PRICE_ID
+- success_url: `${NEXTAUTH_URL}/billing?success=1`
+- cancel_url: `${NEXTAUTH_URL}/billing?canceled=1`
+Return { url } and redirect client to Stripe.
+
+Add Billing UI buttons:
+“Upgrade to Basic/Pro/Enterprise”
+When clicked -> call /api/stripe/checkout and redirect.
+
+4) Webhook
+Add API route:
+POST /api/stripe/webhook
+- verify signature with STRIPE_WEBHOOK_SECRET
+Handle events:
+checkout.session.completed
+customer.subscription.created/updated/deleted
+invoice.payment_failed
+Update Subscription row accordingly.
+Map Stripe product/price -> planKey.
+
+5) Enforcement integration
+In plans.ts / getUserPlan:
+- If admin -> enterprise + unlimited (as today)
+- Else:
+  - If subscription active -> planKey from DB
+  - If no subscription -> default basic (or a “trial basic”)
+If status past_due/canceled -> treat as basic OR block builds (your choice), but chat continues with billing CTA.
+
+6) Proof (must provide)
+- /billing shows current plan and “Manage subscription” link
+- Click upgrade -> Stripe checkout opens (test mode)
+- Complete checkout -> webhook updates DB -> /api/billing/plan returns paid planKey
+- Show owner still unlimited even without Stripe subscription.
+Stop on errors; minimal changes; keep tests passing (add a few Stripe webhook unit tests with signature verification mocked).

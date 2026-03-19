@@ -133,7 +133,7 @@ run_batch "Batch 2/2 (API)" \
   tests/07-runner-extended.test.ts tests/08-deploy-proxy.test.ts \
   tests/09-sse-correctness.test.ts tests/10-misc-regressions.test.ts \
   tests/14-api-surface.test.ts tests/15-build-gate-extended.test.ts \
-  tests/17-edge-cases.test.ts tests/21-plan-limits.test.ts
+  tests/17-edge-cases.test.ts tests/21-plan-limits.test.ts tests/22-stripe-webhook.test.ts
 
 log ""
 log "============================================"

@@ -17,6 +17,9 @@ const EXPECTED_ROUTES = [
   "/api/agent-mode",
   "/api/debug-routes",
   "/api/debug/api-routes",
+  "/api/stripe/checkout",
+  "/api/stripe/webhook",
+  "/api/stripe/portal",
 ];
 
 function getGitCommit(): string {
