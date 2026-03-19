@@ -22,6 +22,7 @@ model User {
   creditBalance  CreditBalance?  @relation("CreditBalanceUser")
   creditUsage    CreditUsage[]   @relation("CreditUsageUser")
   buildQueueJobs BuildQueueJob[]
+  subscription   Subscription?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 }
@@ -277,6 +278,33 @@ model StripePurchase {
   createdAt       DateTime @default(now())
 
   @@index([userId, createdAt])
+}
+
+model Subscription {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planKey              String    @default("basic")
+  status               String    @default("active")
+  currentPeriodEnd     DateTime?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([planKey])
+}
+
+model PlanConfig {
+  planKey              String   @id @unique
+  maxRunningBuilds     Int      @default(1)
+  maxQueuedBuilds      Int      @default(5)
+  maxAiRequestsPerMonth Int     @default(50)
+  maxAiTokensPerMonth  Int      @default(100000)
+  maxDeploysPerDay     Int      @default(3)
+  priority             Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 }
 
 model Deployment {
