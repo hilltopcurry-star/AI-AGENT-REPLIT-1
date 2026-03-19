@@ -19,7 +19,7 @@ AI-powered development workspace built with Next.js App Router. Deterministic mo
 - **Auth**: NextAuth.js (Auth.js v5 beta) with Google OAuth + Prisma adapter + trustHost
 - **AI**: Agent router (`lib/agent/index.ts`) → mock-agent.ts (default) or llm-agent.ts (when AI_AGENT_MODE=llm)
 - **Build**: Real sandboxed runner (`lib/job-runner.ts`) or mock logs, controlled by `BUILD_RUNNER_MODE`
-- **Deploy**: Reverse-proxy deployer (`lib/deployer.ts`) — spawns `next start` on internal port, proxies via `/api/deployments/{id}/proxy`. Fly.io URL is primary "Live URL" when FlyDeployment exists; proxy URL shown as debug fallback. Done events include `deploymentProvider` ("fly" or "replit-proxy") and `deploymentId`.
+- **Deploy**: `deployWorkspace()` attempts Fly.io first when `FLY_API_TOKEN` is set; on Fly success returns Fly URL as primary. Falls back to reverse-proxy deployer (spawns `next start`, proxies via `/api/deployments/{id}/proxy`). Done events include `deploymentProvider` ("fly" or "replit-proxy") and `deploymentId`. `FlyDeployment.queueJobId` is now optional (supports both queue worker and direct job-runner paths).
 - **Cost Controls**: Kill switch, daily request/token caps, per-request token limit, usage tracking
 - **Cleanup**: TTL-based workspace cleanup, per-user workspace/deployment limits
 - **UI**: Radix UI + Tailwind CSS + shadcn/ui components

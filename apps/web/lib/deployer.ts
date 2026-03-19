@@ -186,6 +186,38 @@ export async function deployWorkspace({
 }): Promise<{ url: string; deploymentId: string }> {
   await log(jobId, "INFO", "[DEPLOY] Starting deployment...");
 
+  const flyTokenPresent = !!process.env.FLY_API_TOKEN;
+  await log(jobId, "INFO", `[DEPLOY] flyTokenPresent=${flyTokenPresent}`);
+
+  if (flyTokenPresent) {
+    try {
+      await log(jobId, "INFO", "[DEPLOY] attempting fly deploy...");
+      const { deployToFly } = await import("./fly-deployer");
+      const flyResult = await deployToFly({
+        userId,
+        projectId,
+        jobId,
+        workspacePath,
+      });
+      if (flyResult.status === "SUCCESS" && flyResult.url) {
+        await log(jobId, "SUCCESS", `[DEPLOY] Fly URL: ${flyResult.url}`);
+        await log(jobId, "INFO", `[DEPLOY] Provider: fly`);
+
+        const proxyDeployment = await prisma.deployment.create({
+          data: { userId, projectId, jobId, provider: "fly", status: "SUCCESS", url: flyResult.url, workspacePath },
+        });
+
+        return { url: flyResult.url, deploymentId: proxyDeployment.id };
+      }
+      await log(jobId, "WARN", `[DEPLOY] Fly deploy failed (${flyResult.status}): ${flyResult.error || "unknown"}`);
+      await log(jobId, "INFO", "[DEPLOY] Falling back to proxy deploy...");
+    } catch (flyErr) {
+      const msg = flyErr instanceof Error ? flyErr.message : String(flyErr);
+      await log(jobId, "WARN", `[DEPLOY] Fly deploy error: ${msg}`);
+      await log(jobId, "INFO", "[DEPLOY] Falling back to proxy deploy...");
+    }
+  }
+
   const port = hashToPort(jobId);
 
   const deployment = await prisma.deployment.create({
@@ -277,22 +309,10 @@ export async function deployWorkspace({
     });
 
     await log(jobId, "SUCCESS", `[DEPLOY] Health check passed on port ${port}`);
-    await log(jobId, "INFO", `[DEPLOY] Proxy URL (debug): ${liveUrl}`);
+    await log(jobId, "SUCCESS", `[DEPLOY] Live URL: ${liveUrl}`);
+    await log(jobId, "INFO", `[DEPLOY] Provider: replit-proxy`);
 
-    const flyDep = await prisma.flyDeployment.findFirst({
-      where: { projectId, status: "SUCCESS" },
-      orderBy: { createdAt: "desc" },
-      select: { url: true },
-    });
-
-    if (flyDep?.url) {
-      await log(jobId, "SUCCESS", `[DEPLOY] Fly URL: ${flyDep.url}`);
-      await log(jobId, "INFO", `[DEPLOY] Proxy URL (optional): ${liveUrl}`);
-    } else {
-      await log(jobId, "SUCCESS", `[DEPLOY] Live URL: ${liveUrl}`);
-    }
-
-    return { url: flyDep?.url || liveUrl, deploymentId };
+    return { url: liveUrl, deploymentId };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     await log(jobId, "ERROR", `[DEPLOY] Deployment failed: ${errMsg}`);

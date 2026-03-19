@@ -277,7 +277,7 @@ docker-context.tar.gz
 }
 
 export async function deployToFly(opts: {
-  queueJobId: string;
+  queueJobId?: string;
   userId: string;
   projectId: string;
   jobId: string | null;
@@ -289,12 +289,16 @@ export async function deployToFly(opts: {
   const region = getFlyRegion();
   const org = getFlyOrg();
 
-  const existing = await prisma.flyDeployment.findUnique({ where: { queueJobId } });
+  let existing = queueJobId
+    ? await prisma.flyDeployment.findUnique({ where: { queueJobId } })
+    : null;
+
   const flyDeployment = existing || await prisma.flyDeployment.create({
     data: {
       userId,
       projectId,
-      queueJobId,
+      ...(queueJobId ? { queueJobId } : {}),
+      ...(jobId ? { jobId } : {}),
       status: "PENDING",
       appName,
     },

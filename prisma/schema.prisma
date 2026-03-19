@@ -156,8 +156,9 @@ model FlyDeployment {
   id            String   @id @default(cuid())
   userId        String
   projectId     String
-  queueJobId    String   @unique
-  queueJob      BuildQueueJob @relation(fields: [queueJobId], references: [id], onDelete: Cascade)
+  queueJobId    String?  @unique
+  queueJob      BuildQueueJob? @relation(fields: [queueJobId], references: [id], onDelete: Cascade)
+  jobId         String?
   status        String   @default("PENDING")
   appName       String?
   url           String?
@@ -167,6 +168,7 @@ model FlyDeployment {
 
   @@index([userId])
   @@index([projectId])
+  @@index([jobId])
 }
 
 model MemoryItem {
