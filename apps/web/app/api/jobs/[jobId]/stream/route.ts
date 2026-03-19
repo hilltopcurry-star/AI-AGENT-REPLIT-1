@@ -110,6 +110,15 @@ export async function GET(
                 );
               }
 
+              const job = await prisma.job.findUnique({ where: { id: jobId }, select: { projectId: true } });
+              const flyDep = job
+                ? await prisma.flyDeployment.findFirst({
+                    where: { projectId: job.projectId, status: "SUCCESS" },
+                    orderBy: { createdAt: "desc" },
+                    select: { url: true },
+                  })
+                : null;
+
               const deployment = await prisma.deployment.findUnique({
                 where: { jobId },
                 select: { id: true, url: true, status: true },
@@ -120,8 +129,16 @@ export async function GET(
                 jobId,
                 status: currentJob.status,
               };
-              if (deployment?.status === "SUCCESS" && deployment.url) {
+
+              if (flyDep?.url) {
+                donePayload.deploymentUrl = flyDep.url;
+                donePayload.deploymentProvider = "fly";
+                if (deployment?.status === "SUCCESS" && deployment.url) {
+                  donePayload.proxyUrl = deployment.url;
+                }
+              } else if (deployment?.status === "SUCCESS" && deployment.url) {
                 donePayload.deploymentUrl = deployment.url;
+                donePayload.deploymentProvider = "replit-proxy";
                 donePayload.deploymentId = deployment.id;
               }
 

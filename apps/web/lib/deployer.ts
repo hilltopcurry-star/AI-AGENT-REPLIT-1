@@ -277,10 +277,22 @@ export async function deployWorkspace({
     });
 
     await log(jobId, "SUCCESS", `[DEPLOY] Health check passed on port ${port}`);
-    await log(jobId, "SUCCESS", `[DEPLOY] Live URL: ${liveUrl}`);
-    await log(jobId, "INFO", `[DEPLOY] Deployed app /api/health: http://127.0.0.1:${port}/api/health`);
+    await log(jobId, "INFO", `[DEPLOY] Proxy URL (debug): ${liveUrl}`);
 
-    return { url: liveUrl, deploymentId };
+    const flyDep = await prisma.flyDeployment.findFirst({
+      where: { projectId, status: "SUCCESS" },
+      orderBy: { createdAt: "desc" },
+      select: { url: true },
+    });
+
+    if (flyDep?.url) {
+      await log(jobId, "SUCCESS", `[DEPLOY] Fly URL: ${flyDep.url}`);
+      await log(jobId, "INFO", `[DEPLOY] Proxy URL (optional): ${liveUrl}`);
+    } else {
+      await log(jobId, "SUCCESS", `[DEPLOY] Live URL: ${liveUrl}`);
+    }
+
+    return { url: flyDep?.url || liveUrl, deploymentId };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     await log(jobId, "ERROR", `[DEPLOY] Deployment failed: ${errMsg}`);

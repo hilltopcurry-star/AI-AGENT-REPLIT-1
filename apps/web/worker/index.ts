@@ -203,7 +203,10 @@ async function processQueueJob(queueJob: {
       jobId,
       workspacePath: workspaceDir,
     });
-    if (flyResult.url) {
+    if (flyResult.status === "SUCCESS" && flyResult.url) {
+      await log(jobId, "SUCCESS", `[DEPLOY] Fly URL: ${flyResult.url}`);
+      await log(jobId, "INFO", `[DEPLOY] Provider: fly`);
+    } else if (flyResult.url) {
       await log(jobId, "INFO", `[WORKER] Fly result: ${flyResult.status} — ${flyResult.url}`);
     }
 

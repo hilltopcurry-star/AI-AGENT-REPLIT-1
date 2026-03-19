@@ -42,6 +42,7 @@ export function ConsolePanel({ projectId, activeJobId }: ConsolePanelProps) {
   const [streamingLogs, setStreamingLogs] = useState<LogEntry[]>([]);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [deploymentUrl, setDeploymentUrl] = useState<string | null>(null);
+  const [deploymentProvider, setDeploymentProvider] = useState<string | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
@@ -83,6 +84,7 @@ export function ConsolePanel({ projectId, activeJobId }: ConsolePanelProps) {
         if (parsed.type === "job_done") {
           setJobStatus(parsed.status);
           if (parsed.deploymentUrl) setDeploymentUrl(parsed.deploymentUrl);
+          if (parsed.deploymentProvider) setDeploymentProvider(parsed.deploymentProvider);
           eventSource.close();
         } else if (parsed.id && !seenIdsRef.current.has(parsed.id)) {
           seenIdsRef.current.add(parsed.id);
@@ -98,6 +100,7 @@ export function ConsolePanel({ projectId, activeJobId }: ConsolePanelProps) {
         const parsed = JSON.parse((event as MessageEvent).data);
         setJobStatus(parsed.status);
         if (parsed.deploymentUrl) setDeploymentUrl(parsed.deploymentUrl);
+        if (parsed.deploymentProvider) setDeploymentProvider(parsed.deploymentProvider);
       } catch {
         // skip
       }
@@ -258,7 +261,8 @@ export function ConsolePanel({ projectId, activeJobId }: ConsolePanelProps) {
           </div>
           {deploymentUrl && (
             <div className="flex items-center gap-2 text-xs text-emerald-400 font-mono mt-1">
-              <span data-testid="text-deployment-url">Live URL:{" "}
+              <span data-testid="text-deployment-url">
+                {deploymentProvider === "fly" ? "🚀 Live URL" : "Live URL"}:{" "}
                 <a
                   href={deploymentUrl}
                   target="_blank"

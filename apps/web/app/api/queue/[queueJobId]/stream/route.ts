@@ -66,7 +66,27 @@ export async function GET(
           }
 
           if (["SUCCESS", "FAILED", "CANCELLED"].includes(current.status)) {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done", status: current.status, error: current.error })}\n\n`));
+            const doneData: Record<string, unknown> = { type: "done", status: current.status, error: current.error };
+
+            const flyDep = await prisma.flyDeployment.findFirst({
+              where: { queueJobId, status: "SUCCESS" },
+              select: { url: true },
+            });
+            if (flyDep?.url) {
+              doneData.deploymentUrl = flyDep.url;
+              doneData.deploymentProvider = "fly";
+            } else if (current.jobId) {
+              const dep = await prisma.deployment.findUnique({
+                where: { jobId: current.jobId },
+                select: { url: true, status: true },
+              });
+              if (dep?.status === "SUCCESS" && dep.url) {
+                doneData.deploymentUrl = dep.url;
+                doneData.deploymentProvider = "replit-proxy";
+              }
+            }
+
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(doneData)}\n\n`));
             controller.enqueue(encoder.encode("data: [DONE]\n\n"));
             controller.close();
             return;
