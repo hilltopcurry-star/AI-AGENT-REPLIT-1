@@ -124,7 +124,9 @@ async function handleSubscriptionUpdate(sub: Stripe.Subscription) {
       status,
       stripeSubscriptionId: sub.id,
       ...(planKey ? { planKey } : {}),
-      currentPeriodEnd: new Date(sub.current_period_end * 1000),
+      currentPeriodEnd: sub.items?.data?.[0]?.current_period_end
+        ? new Date(sub.items.data[0].current_period_end * 1000)
+        : undefined,
     },
   });
 
