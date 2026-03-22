@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import * as fs from "fs";
-import * as path from "path";
 
 const EXPECTED_ROUTES = [
   "/api/health",
@@ -24,27 +22,13 @@ const EXPECTED_ROUTES = [
   "/api/stripe/portal",
 ];
 
-function getCommit(): string {
-  const candidates = [
-    path.join(process.cwd(), "public", "__commit.txt"),
-    path.join(__dirname, "..", "..", "..", "..", "public", "__commit.txt"),
-  ];
-  for (const p of candidates) {
-    try {
-      const val = fs.readFileSync(p, "utf8").trim();
-      if (val && val !== "unknown") return val;
-    } catch {}
-  }
-  return process.env.RAILWAY_GIT_COMMIT_SHA || "unknown";
-}
-
 export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const commit = getCommit();
+  const commit = process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.RAILWAY_GIT_COMMIT ?? "unknown";
 
   return NextResponse.json({
     commit,
