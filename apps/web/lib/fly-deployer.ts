@@ -23,6 +23,55 @@ function getFlyRegion(): string {
   return process.env.FLY_REGION || "iad";
 }
 
+function ensureFlyctl(): boolean {
+  console.log("[DEPLOY] ensureFlyctl: checking...");
+
+  const homeDirs = [process.env.HOME || "/root", "/root", "/home/runner"];
+  for (const home of homeDirs) {
+    const bin = path.join(home, ".fly", "bin");
+    if (fs.existsSync(path.join(bin, "flyctl"))) {
+      if (!process.env.PATH?.includes(bin)) {
+        process.env.PATH = `${bin}:${process.env.PATH}`;
+      }
+    }
+  }
+
+  try {
+    const result = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+    if (result.status === 0) {
+      const ver = (result.stdout || "").trim().split("\n")[0];
+      console.log(`[DEPLOY] ensureFlyctl: flyctl version: ${ver}`);
+      return true;
+    }
+  } catch {}
+
+  console.log("[DEPLOY] ensureFlyctl: installing...");
+  try {
+    execSync("curl -L https://fly.io/install.sh | sh", {
+      timeout: 60000,
+      stdio: "pipe",
+      encoding: "utf-8",
+      env: { ...process.env },
+    });
+
+    for (const home of homeDirs) {
+      const bin = path.join(home, ".fly", "bin");
+      if (fs.existsSync(path.join(bin, "flyctl"))) {
+        process.env.PATH = `${bin}:${process.env.PATH}`;
+        const result = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+        const ver = (result.stdout || "").trim().split("\n")[0];
+        console.log(`[DEPLOY] ensureFlyctl: flyctl version: ${ver}`);
+        return true;
+      }
+    }
+    console.error("[DEPLOY] ensureFlyctl: install script ran but binary not found");
+    return false;
+  } catch (err) {
+    console.error("[DEPLOY] ensureFlyctl: install failed:", err instanceof Error ? err.message : err);
+    return false;
+  }
+}
+
 function hasFlyctl(): boolean {
   try {
     const result = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
@@ -284,6 +333,12 @@ export async function deployToFly(opts: {
   workspacePath: string;
 }): Promise<{ flyDeploymentId: string; status: string; url?: string; error?: string }> {
   const { queueJobId, userId, projectId, jobId, workspacePath } = opts;
+
+  if (process.env.FLY_API_TOKEN) {
+    await logToJob(jobId, "INFO", "[DEPLOY] ensureFlyctl: checking...");
+    const flyReady = ensureFlyctl();
+    await logToJob(jobId, "INFO", `[DEPLOY] ensureFlyctl: available=${flyReady}`);
+  }
 
   const appName = getAppName(projectId);
   const region = getFlyRegion();
