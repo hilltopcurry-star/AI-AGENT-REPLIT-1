@@ -125,11 +125,9 @@ async function handleSubscriptionUpdate(sub: Stripe.Subscription) {
       stripeSubscriptionId: sub.id,
       ...(planKey ? { planKey } : {}),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      currentPeriodEnd: (() => {
-        const s = sub as unknown as { items?: { data?: Array<{ current_period_end?: number }> } };
-        const periodEnd = s.items?.data?.[0]?.current_period_end;
-        return typeof periodEnd === "number" ? new Date(periodEnd * 1000) : undefined;
-      })(),
+      currentPeriodEnd: typeof (sub as any).current_period_end === "number"
+        ? new Date((sub as any).current_period_end * 1000)
+        : undefined,
     },
   });
 
