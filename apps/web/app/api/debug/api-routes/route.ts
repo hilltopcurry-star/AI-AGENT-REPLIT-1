@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { execSync } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 
 const EXPECTED_ROUTES = [
   "/api/health",
@@ -23,22 +24,18 @@ const EXPECTED_ROUTES = [
   "/api/stripe/portal",
 ];
 
-function getGitCommit(): string {
-  try {
-    return execSync("git rev-parse HEAD", { timeout: 3000 }).toString().trim();
-  } catch {
+function getCommit(): string {
+  const candidates = [
+    path.join(process.cwd(), "public", "__commit.txt"),
+    path.join(__dirname, "..", "..", "..", "..", "public", "__commit.txt"),
+  ];
+  for (const p of candidates) {
     try {
-      const fs = require("fs");
-      const head = fs.readFileSync(".git/HEAD", "utf8").trim();
-      if (head.startsWith("ref:")) {
-        const ref = head.replace("ref: ", "");
-        return fs.readFileSync(`.git/${ref}`, "utf8").trim();
-      }
-      return head;
-    } catch {
-      return process.env.RAILWAY_GIT_COMMIT_SHA || "unknown";
-    }
+      const val = fs.readFileSync(p, "utf8").trim();
+      if (val && val !== "unknown") return val;
+    } catch {}
   }
+  return process.env.RAILWAY_GIT_COMMIT_SHA || "unknown";
 }
 
 export async function GET() {
@@ -47,7 +44,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const commit = getGitCommit();
+  const commit = getCommit();
 
   return NextResponse.json({
     commit,

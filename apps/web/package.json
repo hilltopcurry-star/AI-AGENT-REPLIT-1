@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p ${PORT:-5000}",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && node scripts/write-commit.js && next build",
     "start": "next start -p $PORT",
     "postinstall": "prisma generate",
     "worker": "npx tsx worker/index.ts"
