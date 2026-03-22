@@ -24,47 +24,88 @@ function getFlyRegion(): string {
 }
 
 function ensureFlyctl(): boolean {
-  console.log("[DEPLOY] ensureFlyctl: checking...");
+  const home = process.env.HOME || "/root";
+  console.log(`[DEPLOY] ensureFlyctl: checking... HOME=${home}`);
 
-  const homeDirs = [process.env.HOME || "/root", "/root", "/home/runner"];
-  for (const home of homeDirs) {
-    const bin = path.join(home, ".fly", "bin");
-    if (fs.existsSync(path.join(bin, "flyctl"))) {
-      if (!process.env.PATH?.includes(bin)) {
-        process.env.PATH = `${bin}:${process.env.PATH}`;
-      }
-    }
-  }
+  const candidatePaths = [
+    "/usr/local/bin/flyctl",
+    path.join(home, ".fly", "bin", "flyctl"),
+    "/root/.fly/bin/flyctl",
+    "/home/railway/.fly/bin/flyctl",
+    "/home/runner/.fly/bin/flyctl",
+  ];
 
-  try {
-    const result = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
-    if (result.status === 0) {
-      const ver = (result.stdout || "").trim().split("\n")[0];
-      console.log(`[DEPLOY] ensureFlyctl: flyctl version: ${ver}`);
-      return true;
-    }
-  } catch {}
+  process.env.PATH = `/usr/local/bin:${process.env.PATH}`;
 
-  console.log("[DEPLOY] ensureFlyctl: installing...");
-  try {
-    execSync("curl -L https://fly.io/install.sh | sh", {
-      timeout: 60000,
-      stdio: "pipe",
-      encoding: "utf-8",
-      env: { ...process.env },
-    });
-
-    for (const home of homeDirs) {
-      const bin = path.join(home, ".fly", "bin");
-      if (fs.existsSync(path.join(bin, "flyctl"))) {
-        process.env.PATH = `${bin}:${process.env.PATH}`;
-        const result = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+  for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+      console.log(`[DEPLOY] ensureFlyctl: found existing binary at ${p}`);
+      try {
+        execSync(`ln -sf ${p} /usr/local/bin/flyctl && chmod +x /usr/local/bin/flyctl`, { timeout: 5000 });
+      } catch {}
+      const result = spawnSync("/usr/local/bin/flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+      if (result.status === 0) {
         const ver = (result.stdout || "").trim().split("\n")[0];
+        console.log(`[DEPLOY] ensureFlyctl: using flyctl at: /usr/local/bin/flyctl`);
         console.log(`[DEPLOY] ensureFlyctl: flyctl version: ${ver}`);
         return true;
       }
     }
-    console.error("[DEPLOY] ensureFlyctl: install script ran but binary not found");
+  }
+
+  console.log(`[DEPLOY] ensureFlyctl: candidate paths checked: ${candidatePaths.join(", ")} — none found`);
+  console.log("[DEPLOY] ensureFlyctl: installing...");
+
+  try {
+    const installOutput = execSync("curl -L https://fly.io/install.sh | sh 2>&1", {
+      timeout: 90000,
+      encoding: "utf-8",
+      env: { ...process.env },
+    });
+    console.log(`[DEPLOY] ensureFlyctl: install output (last 500): ${installOutput.slice(-500)}`);
+
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        console.log(`[DEPLOY] ensureFlyctl: post-install found binary at ${p}`);
+        try {
+          execSync(`ln -sf ${p} /usr/local/bin/flyctl && chmod +x /usr/local/bin/flyctl`, { timeout: 5000 });
+        } catch (linkErr) {
+          console.log(`[DEPLOY] ensureFlyctl: symlink failed, adding to PATH instead: ${linkErr}`);
+          const dir = path.dirname(p);
+          process.env.PATH = `${dir}:${process.env.PATH}`;
+        }
+
+        const result = spawnSync(p, ["version"], { timeout: 5000, encoding: "utf-8" });
+        if (result.status === 0) {
+          const ver = (result.stdout || "").trim().split("\n")[0];
+          console.log(`[DEPLOY] ensureFlyctl: using flyctl at: ${p}`);
+          console.log(`[DEPLOY] ensureFlyctl: flyctl version: ${ver}`);
+          return true;
+        }
+      }
+    }
+
+    try {
+      const found = execSync("find / -name flyctl -type f 2>/dev/null || true", { timeout: 10000, encoding: "utf-8" }).trim();
+      console.log(`[DEPLOY] ensureFlyctl: find result: ${found || "(empty)"}`);
+      if (found) {
+        const firstBin = found.split("\n")[0];
+        try {
+          execSync(`ln -sf ${firstBin} /usr/local/bin/flyctl && chmod +x /usr/local/bin/flyctl`, { timeout: 5000 });
+        } catch {
+          process.env.PATH = `${path.dirname(firstBin)}:${process.env.PATH}`;
+        }
+        const result = spawnSync(firstBin, ["version"], { timeout: 5000, encoding: "utf-8" });
+        if (result.status === 0) {
+          const ver = (result.stdout || "").trim().split("\n")[0];
+          console.log(`[DEPLOY] ensureFlyctl: using flyctl at: ${firstBin}`);
+          console.log(`[DEPLOY] ensureFlyctl: flyctl version: ${ver}`);
+          return true;
+        }
+      }
+    } catch {}
+
+    console.error("[DEPLOY] ensureFlyctl: install script ran but binary not found anywhere");
     return false;
   } catch (err) {
     console.error("[DEPLOY] ensureFlyctl: install failed:", err instanceof Error ? err.message : err);
