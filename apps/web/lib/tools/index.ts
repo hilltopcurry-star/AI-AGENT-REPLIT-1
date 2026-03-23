@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { setMemory } from "@/lib/memory";
 import { detectTemplateKey, getTemplate } from "@/lib/templates";
@@ -59,7 +60,7 @@ const saveProjectSpec: Tool = {
 
     await prisma.project.update({
       where: { id: projectId },
-      data: { specJson: spec },
+      data: { specJson: spec as Prisma.InputJsonValue },
     });
 
     return {
