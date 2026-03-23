@@ -323,6 +323,8 @@ async function poll() {
 }
 
 async function main() {
+  console.log(`[worker] commit=${process.env.RAILWAY_GIT_COMMIT_SHA || "unknown"} node=${process.version} cwd=${process.cwd()}`);
+  console.log(`[worker] flyctlInstaller=v3-direct-download`);
   console.log(`[${WORKER_ID}] Build worker started (max concurrent: ${MAX_CONCURRENT}, poll: ${POLL_INTERVAL_MS}ms)`);
 
   if (process.env.FLY_API_TOKEN) {
