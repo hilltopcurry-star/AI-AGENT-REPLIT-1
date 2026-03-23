@@ -8,7 +8,7 @@ const prisma = new PrismaClient();
 const WORKER_ID = process.env.WORKER_ID || `worker-${process.pid}`;
 
 function ensureFlyctl(): boolean {
-  console.log(`[${WORKER_ID}] ensureFlyctl: v3-direct-download`);
+  console.log(`[${WORKER_ID}] ensureFlyctl: v4-robust-download`);
   process.env.PATH = `/usr/local/bin:/usr/bin:${process.env.PATH}`;
 
   try {
@@ -21,40 +21,99 @@ function ensureFlyctl(): boolean {
 
   console.log(`[${WORKER_ID}] ensureFlyctl: not found, installing prerequisites...`);
   try {
-    execSync("apt-get update -qq 2>&1 && apt-get install -y -qq curl ca-certificates 2>&1", { timeout: 120000, encoding: "utf-8" });
-    console.log(`[${WORKER_ID}] ensureFlyctl: curl installed`);
+    execSync("apt-get update -qq 2>&1 && apt-get install -y -qq curl ca-certificates file 2>&1", { timeout: 120000, encoding: "utf-8" });
+    console.log(`[${WORKER_ID}] ensureFlyctl: curl+file installed`);
   } catch (e: unknown) {
     console.error(`[${WORKER_ID}] ensureFlyctl: apt failed: ${(e as Error).message || e}`);
   }
 
-  const dlUrl = "https://github.com/superfly/flyctl/releases/latest/download/flyctl_Linux_x86_64.tar.gz";
-  console.log(`[${WORKER_ID}] ensureFlyctl: downloading ${dlUrl}`);
-  try {
-    execSync(`curl -sL "${dlUrl}" -o /tmp/flyctl.tar.gz && ls -la /tmp/flyctl.tar.gz`, { timeout: 60000, encoding: "utf-8" });
-    console.log(`[${WORKER_ID}] ensureFlyctl: extracting to /tmp...`);
-    execSync("tar -xzf /tmp/flyctl.tar.gz -C /tmp", { timeout: 30000, encoding: "utf-8" });
+  const downloadUrls = [
+    "https://github.com/superfly/flyctl/releases/latest/download/flyctl_Linux_x86_64.tar.gz",
+    "https://github.com/superfly/flyctl/releases/download/v0.3.98/flyctl_Linux_x86_64.tar.gz",
+    "https://fly.io/install.sh",
+  ];
 
-    const extracted = fs.existsSync("/tmp/flyctl");
-    console.log(`[${WORKER_ID}] ensureFlyctl: exists(/tmp/flyctl)=${extracted}`);
+  for (const dlUrl of downloadUrls) {
+    const isInstallScript = dlUrl.endsWith("install.sh");
+    console.log(`[${WORKER_ID}] ensureFlyctl: trying ${dlUrl}`);
 
-    if (extracted) {
-      execSync("mv /tmp/flyctl /usr/local/bin/flyctl && chmod +x /usr/local/bin/flyctl", { timeout: 5000 });
-      const exists = fs.existsSync("/usr/local/bin/flyctl");
-      console.log(`[${WORKER_ID}] ensureFlyctl: exists(/usr/local/bin/flyctl)=${exists}`);
-
-      const r = spawnSync("/usr/local/bin/flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
-      if (r.status === 0) {
-        console.log(`[${WORKER_ID}] ensureFlyctl: flyctl version: ${(r.stdout || "").trim().split("\n")[0]}`);
-        return true;
+    try {
+      if (isInstallScript) {
+        try {
+          execSync(`curl -fL --retry 3 --retry-delay 2 "${dlUrl}" | sh`, {
+            timeout: 120000,
+            encoding: "utf-8",
+            env: { ...process.env, FLYCTL_INSTALL: "/usr/local" },
+          });
+        } catch {}
+        if (fs.existsSync("/usr/local/bin/flyctl")) {
+          const r = spawnSync("/usr/local/bin/flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+          if (r.status === 0) {
+            console.log(`[${WORKER_ID}] ensureFlyctl: install.sh succeeded — ${(r.stdout || "").trim().split("\n")[0]}`);
+            return true;
+          }
+        }
+        console.log(`[${WORKER_ID}] ensureFlyctl: install.sh did not produce working flyctl`);
+        continue;
       }
-      console.error(`[${WORKER_ID}] ensureFlyctl: version check failed exit=${r.status} stderr=${(r.stderr || "").slice(0, 200)}`);
+
+      execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 });
+
+      try {
+        const headerOut = execSync(`curl -fIL --retry 2 --retry-delay 2 "${dlUrl}" 2>&1 | head -20`, {
+          timeout: 30000,
+          encoding: "utf-8",
+        });
+        console.log(`[${WORKER_ID}] ensureFlyctl: headers:\n${headerOut.trim().split("\n").slice(0, 8).join("\n")}`);
+      } catch {}
+
+      execSync(`curl -fL --retry 3 --retry-delay 2 -o /tmp/flyctl.tar.gz "${dlUrl}"`, { timeout: 60000, encoding: "utf-8" });
+
+      const sizeOut = execSync("ls -lh /tmp/flyctl.tar.gz", { timeout: 5000, encoding: "utf-8" }).trim();
+      console.log(`[${WORKER_ID}] ensureFlyctl: ${sizeOut}`);
+
+      let fileType = "unknown";
+      try {
+        fileType = execSync("file /tmp/flyctl.tar.gz", { timeout: 5000, encoding: "utf-8" }).trim();
+      } catch {
+        try {
+          const head = execSync("head -c 2 /tmp/flyctl.tar.gz | od -A x -t x1z | head -1", { timeout: 5000, encoding: "utf-8" }).trim();
+          fileType = head.includes("1f 8b") ? "gzip compressed" : `not-gzip (header: ${head})`;
+        } catch {}
+      }
+      console.log(`[${WORKER_ID}] ensureFlyctl: file type: ${fileType}`);
+
+      if (!fileType.toLowerCase().includes("gzip") && !fileType.toLowerCase().includes("compressed")) {
+        try {
+          const preview = execSync("head -c 200 /tmp/flyctl.tar.gz", { timeout: 5000, encoding: "utf-8" });
+          console.error(`[${WORKER_ID}] ensureFlyctl: NOT gzip! First 200 bytes: ${preview.slice(0, 200)}`);
+        } catch {}
+        console.error(`[${WORKER_ID}] ensureFlyctl: skipping ${dlUrl} (not gzip)`);
+        continue;
+      }
+
+      console.log(`[${WORKER_ID}] ensureFlyctl: extracting to /tmp...`);
+      execSync("tar -xzf /tmp/flyctl.tar.gz -C /tmp", { timeout: 30000, encoding: "utf-8" });
+
+      const extracted = fs.existsSync("/tmp/flyctl");
+      console.log(`[${WORKER_ID}] ensureFlyctl: exists(/tmp/flyctl)=${extracted}`);
+
+      if (extracted) {
+        execSync("mv /tmp/flyctl /usr/local/bin/flyctl && chmod +x /usr/local/bin/flyctl", { timeout: 5000 });
+        const r = spawnSync("/usr/local/bin/flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+        if (r.status === 0) {
+          console.log(`[${WORKER_ID}] ensureFlyctl: flyctl version: ${(r.stdout || "").trim().split("\n")[0]}`);
+          return true;
+        }
+        console.error(`[${WORKER_ID}] ensureFlyctl: version check failed exit=${r.status} stderr=${(r.stderr || "").slice(0, 200)}`);
+      }
+    } catch (e: unknown) {
+      console.error(`[${WORKER_ID}] ensureFlyctl: attempt failed for ${dlUrl}: ${(e as Error).message || e}`);
     }
-  } catch (e: unknown) {
-    console.error(`[${WORKER_ID}] ensureFlyctl: download/extract failed: ${(e as Error).message || e}`);
   }
 
   execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 }).toString();
-  console.error(`[${WORKER_ID}] ensureFlyctl: all attempts failed`);
+  console.error(`[${WORKER_ID}] ensureFlyctl: all download attempts failed`);
   return false;
 }
 const POLL_INTERVAL_MS = parseInt(process.env.WORKER_POLL_MS || "3000", 10);
