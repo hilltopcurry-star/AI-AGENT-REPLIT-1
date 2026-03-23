@@ -1,45 +1,60 @@
 import { PrismaClient } from "@prisma/client";
 import * as fs from "fs";
 import * as path from "path";
-import { spawn, ChildProcess, execSync } from "child_process";
+import { spawn, spawnSync, ChildProcess, execSync } from "child_process";
 
 const prisma = new PrismaClient();
 const WORKER_ID = process.env.WORKER_ID || `worker-${process.pid}`;
 
 function ensureFlyctl(): boolean {
-  const flyBin = path.join(process.env.HOME || "/root", ".fly", "bin", "flyctl");
-  if (fs.existsSync(flyBin)) {
-    if (!process.env.PATH?.includes(".fly/bin")) {
-      process.env.PATH = `${path.dirname(flyBin)}:${process.env.PATH}`;
-    }
-    console.log(`[${WORKER_ID}] flyctl already installed at ${flyBin}`);
-    return true;
-  }
-  console.log(`[${WORKER_ID}] Installing flyctl...`);
+  console.log(`[${WORKER_ID}] ensureFlyctl: v3-direct-download`);
+  process.env.PATH = `/usr/local/bin:/usr/bin:${process.env.PATH}`;
+
   try {
-    execSync("curl -L https://fly.io/install.sh | sh", {
-      timeout: 60000,
-      stdio: "pipe",
-      encoding: "utf-8",
-      env: { ...process.env },
-    });
-    if (fs.existsSync(flyBin)) {
-      process.env.PATH = `${path.dirname(flyBin)}:${process.env.PATH}`;
-      console.log(`[${WORKER_ID}] flyctl installed successfully`);
+    const r = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+    if (r.status === 0) {
+      console.log(`[${WORKER_ID}] ensureFlyctl: already installed — ${(r.stdout || "").trim().split("\n")[0]}`);
       return true;
     }
-    const altBin = "/root/.fly/bin/flyctl";
-    if (fs.existsSync(altBin)) {
-      process.env.PATH = `/root/.fly/bin:${process.env.PATH}`;
-      console.log(`[${WORKER_ID}] flyctl installed at ${altBin}`);
-      return true;
-    }
-    console.error(`[${WORKER_ID}] flyctl install script ran but binary not found`);
-    return false;
-  } catch (err) {
-    console.error(`[${WORKER_ID}] Failed to install flyctl:`, err instanceof Error ? err.message : err);
-    return false;
+  } catch {}
+
+  console.log(`[${WORKER_ID}] ensureFlyctl: not found, installing prerequisites...`);
+  try {
+    execSync("apt-get update -qq 2>&1 && apt-get install -y -qq curl ca-certificates 2>&1", { timeout: 120000, encoding: "utf-8" });
+    console.log(`[${WORKER_ID}] ensureFlyctl: curl installed`);
+  } catch (e: unknown) {
+    console.error(`[${WORKER_ID}] ensureFlyctl: apt failed: ${(e as Error).message || e}`);
   }
+
+  const dlUrl = "https://github.com/superfly/flyctl/releases/latest/download/flyctl_Linux_x86_64.tar.gz";
+  console.log(`[${WORKER_ID}] ensureFlyctl: downloading ${dlUrl}`);
+  try {
+    execSync(`curl -sL "${dlUrl}" -o /tmp/flyctl.tar.gz && ls -la /tmp/flyctl.tar.gz`, { timeout: 60000, encoding: "utf-8" });
+    console.log(`[${WORKER_ID}] ensureFlyctl: extracting to /tmp...`);
+    execSync("tar -xzf /tmp/flyctl.tar.gz -C /tmp", { timeout: 30000, encoding: "utf-8" });
+
+    const extracted = fs.existsSync("/tmp/flyctl");
+    console.log(`[${WORKER_ID}] ensureFlyctl: exists(/tmp/flyctl)=${extracted}`);
+
+    if (extracted) {
+      execSync("mv /tmp/flyctl /usr/local/bin/flyctl && chmod +x /usr/local/bin/flyctl", { timeout: 5000 });
+      const exists = fs.existsSync("/usr/local/bin/flyctl");
+      console.log(`[${WORKER_ID}] ensureFlyctl: exists(/usr/local/bin/flyctl)=${exists}`);
+
+      const r = spawnSync("/usr/local/bin/flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+      if (r.status === 0) {
+        console.log(`[${WORKER_ID}] ensureFlyctl: flyctl version: ${(r.stdout || "").trim().split("\n")[0]}`);
+        return true;
+      }
+      console.error(`[${WORKER_ID}] ensureFlyctl: version check failed exit=${r.status} stderr=${(r.stderr || "").slice(0, 200)}`);
+    }
+  } catch (e: unknown) {
+    console.error(`[${WORKER_ID}] ensureFlyctl: download/extract failed: ${(e as Error).message || e}`);
+  }
+
+  execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 }).toString();
+  console.error(`[${WORKER_ID}] ensureFlyctl: all attempts failed`);
+  return false;
 }
 const POLL_INTERVAL_MS = parseInt(process.env.WORKER_POLL_MS || "3000", 10);
 const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT_BUILDS_PER_WORKER || "2", 10);
