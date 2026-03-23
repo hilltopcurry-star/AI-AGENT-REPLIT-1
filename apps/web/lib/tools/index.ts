@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { setMemory } from "@/lib/memory";
+import { detectTemplateKey, getTemplate } from "@/lib/templates";
 
 export interface ToolInput {
   [key: string]: unknown;
@@ -33,15 +34,28 @@ const saveProjectSpec: Tool = {
     required: ["purpose", "features"],
   },
   run: async (input, { projectId }) => {
-    const spec = {
-      purpose: input.purpose as string,
-      features: input.features as string,
+    const purpose = input.purpose as string;
+    const features = input.features as string;
+
+    const templateKey = detectTemplateKey(purpose, features);
+    const template = templateKey ? getTemplate(templateKey) : undefined;
+
+    const spec: Record<string, unknown> = {
+      purpose,
+      features,
       techStack: (input.techStack as string) || "Next.js + Prisma + TailwindCSS",
       architecture: (input.architecture as string) || "",
       milestones: (input.milestones as string) || "",
       generatedBy: "llm",
       createdAt: new Date().toISOString(),
     };
+
+    if (templateKey && template) {
+      spec.templateKey = templateKey;
+      spec.requiredModules = template.requiredModules;
+      spec.requiredRoutes = template.requiredRoutes;
+      spec.requiredEntities = template.requiredEntities;
+    }
 
     await prisma.project.update({
       where: { id: projectId },
@@ -50,7 +64,9 @@ const saveProjectSpec: Tool = {
 
     return {
       success: true,
-      message: "Project specification saved successfully.",
+      message: templateKey
+        ? `Project specification saved with template "${templateKey}".`
+        : "Project specification saved successfully.",
       data: spec,
     };
   },

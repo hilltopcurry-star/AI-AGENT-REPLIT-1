@@ -1,6 +1,6 @@
 # AI Workspace — Phase-Scale-2
 
-## Status: PHASE-SCALE-2 (2026-03-22) — Real Fly.io Deployment + flyctl auto-install
+## Status: PHASE-SCALE-2 (2026-03-23) — Real Fly.io Deployment + flyctl auto-install + Working App Guarantee
 
 ## Overview
 AI-powered development workspace built with Next.js App Router. Deterministic mock agent (Phase-1) with optional LLM agent behind `AI_AGENT_MODE` feature flag. Real sandboxed build runner behind `BUILD_RUNNER_MODE` feature flag. Reverse-proxy deployer launches built apps and serves them via proxy routes. 3 workspace tabs (Chat, Console, Database). Google OAuth authentication. All build logs are DB-backed and streamed via SSE. OpenAI cost controls with kill switch, daily caps, and usage tracking. Workspace cleanup with TTL and per-user limits. Build queue system with worker process for scalable builds. Fly.io deployment stub (Phase-Scale-2 for real API). Admin dashboard for monitoring.
@@ -81,10 +81,14 @@ apps/web/
     llm-agent.ts                   # LLM agent (Phase-2.1, OpenAI, 3-step conversation, cost controls, kill switch)
     job-runner.ts                  # Real sandboxed build runner (Phase-2.2, scaffold gen + npm install/build)
     deployer.ts                    # Reverse-proxy deployer (Phase-2.3, spawns next start, health check, DB record)
+    acceptance-checks.ts           # Post-deploy acceptance checks (health, DB, pages, CRUD) with retry loop
     cleanup.ts                     # Workspace + deployment cleanup (Phase-2.6, TTL, per-user limits)
     memory.ts                      # Memory manager (MemoryItem CRUD with TTL)
+    templates/
+      index.ts                    # Template registry + keyword detection (detectTemplateKey)
+      project-management-saas.ts  # Full SaaS template: Prisma models, pages, API routes, seed data
     tools/
-      index.ts                    # Tool calling (save_project_spec, set_memory, create_build_job)
+      index.ts                    # Tool calling (save_project_spec w/ template detection, set_memory)
   hooks/
     use-toast.ts
     use-mobile.tsx

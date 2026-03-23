@@ -44,7 +44,13 @@
     "../../.tmp-vitest/.next-plan-only/types/**/*.ts",
     "../../.tmp-vitest/.next-plan-only/dev/types/**/*.ts",
     "../../.tmp-vitest/.next-stripe-test/types/**/*.ts",
-    "../../.tmp-vitest/.next-stripe-test/dev/types/**/*.ts"
+    "../../.tmp-vitest/.next-stripe-test/dev/types/**/*.ts",
+    "../../.tmp-vitest/.next-test2/types/**/*.ts",
+    "../../.tmp-vitest/.next-test2/dev/types/**/*.ts",
+    "../../.tmp-vitest/.next-test6/types/**/*.ts",
+    "../../.tmp-vitest/.next-test6/dev/types/**/*.ts",
+    "../../.tmp-vitest/.next-test7/types/**/*.ts",
+    "../../.tmp-vitest/.next-test7/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

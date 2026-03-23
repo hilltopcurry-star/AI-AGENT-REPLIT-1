@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { deployWorkspace } from "./deployer";
 import { requireAndDeductCredits, getCostDeploy, InsufficientCreditsError } from "./credits";
+import { runAcceptanceWithRetry, formatAcceptanceReport } from "./acceptance-checks";
 
 const WORKSPACES_ROOT = "/tmp/workspaces";
 const INSTALL_TIMEOUT = 5 * 60 * 1000;
@@ -60,6 +61,23 @@ function sanitizeSpecString(value: unknown, fallback: string, maxLength = 200): 
 }
 
 function generateScaffold(workspaceDir: string, spec: Record<string, unknown> | null) {
+  const templateKey = spec?.templateKey as string | undefined;
+  if (templateKey) {
+    try {
+      const { getTemplate } = require("./templates");
+      const template = getTemplate(templateKey);
+      if (template) {
+        const pkgJson = template.getPackageJson();
+        writeFile(workspaceDir, "package.json", JSON.stringify(pkgJson, null, 2));
+        const files = template.getFiles();
+        for (const f of files) {
+          writeFile(workspaceDir, f.path, f.content);
+        }
+        return;
+      }
+    } catch {}
+  }
+
   const rawPurpose = sanitizeSpecString(spec?.purpose, "web application");
   const rawFeatures = sanitizeSpecString(spec?.features, "basic features");
   const purpose = escapeForJsx(rawPurpose);
@@ -362,6 +380,8 @@ export async function runJob(jobId: string, projectId: string, userId?: string):
     }
 
     let deploySuccess = false;
+    let liveUrl = "";
+    const hasTemplate = !!(spec?.templateKey);
     try {
       if (resolvedUserId) {
         await requireAndDeductCredits(resolvedUserId, getCostDeploy(), "deploy", jobId, projectId);
@@ -373,8 +393,31 @@ export async function runJob(jobId: string, projectId: string, userId?: string):
         workspacePath: workspaceDir,
       });
       await log(jobId, "SUCCESS", `[DEPLOY] Deployment ${deploymentId} succeeded`);
-      await log(jobId, "SUCCESS", `[DEPLOY] Live URL: ${url}`);
-      deploySuccess = true;
+      liveUrl = url;
+
+      const isProxyUrl = url.includes("/api/deployments/") && url.includes("/proxy");
+      if (isProxyUrl) {
+        await log(jobId, "INFO", "[ACCEPTANCE] Skipping acceptance checks for proxy deployment (requires auth)");
+        await log(jobId, "SUCCESS", `[DEPLOY] Live URL (Production): ${url}`);
+        deploySuccess = true;
+      } else {
+        await log(jobId, "INFO", "[ACCEPTANCE] Starting acceptance checks...");
+        const acceptanceResult = await runAcceptanceWithRetry(url, jobId, hasTemplate);
+        const report = formatAcceptanceReport(acceptanceResult);
+        await log(jobId, "INFO", report);
+
+        if (acceptanceResult.passed) {
+          await log(jobId, "SUCCESS", `[DEPLOY] Live URL (Production): ${url}`);
+          deploySuccess = true;
+        } else {
+          await log(jobId, "ERROR", `[DEPLOY] Deployment live but acceptance checks FAILED. URL: ${url}`);
+          await prisma.deployment.updateMany({
+            where: { jobId },
+            data: { status: "FAILED", error: "Acceptance checks failed" },
+          });
+          deploySuccess = false;
+        }
+      }
     } catch (deployError) {
       if (deployError instanceof InsufficientCreditsError) {
         const reason = deployError.reserved

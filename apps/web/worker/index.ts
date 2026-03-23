@@ -124,14 +124,34 @@ function runCommand(
 }
 
 function generateScaffold(workspaceDir: string, spec: Record<string, unknown> | null) {
-  const purpose = String(spec?.purpose || "web application").slice(0, 200);
-  const features = String(spec?.features || "basic features").slice(0, 200);
-
   const writeFile = (rel: string, content: string) => {
     const full = path.join(workspaceDir, rel);
     fs.mkdirSync(path.dirname(full), { recursive: true });
     fs.writeFileSync(full, content, "utf-8");
   };
+
+  const templateKey = spec?.templateKey as string | undefined;
+  if (templateKey) {
+    try {
+      const { getTemplate } = require("../lib/templates");
+      const template = getTemplate(templateKey);
+      if (template) {
+        console.log(`[WORKER] Using template: ${templateKey}`);
+        const pkgJson = template.getPackageJson();
+        writeFile("package.json", JSON.stringify(pkgJson, null, 2));
+        const files = template.getFiles();
+        for (const f of files) {
+          writeFile(f.path, f.content);
+        }
+        return;
+      }
+    } catch (e) {
+      console.log(`[WORKER] Template load failed (${templateKey}), using default scaffold: ${e}`);
+    }
+  }
+
+  const purpose = String(spec?.purpose || "web application").slice(0, 200);
+  const features = String(spec?.features || "basic features").slice(0, 200);
 
   writeFile("package.json", JSON.stringify({
     name: "generated-app", version: "1.0.0", private: true,
@@ -256,18 +276,51 @@ async function processQueueJob(queueJob: {
       jobId,
       workspacePath: workspaceDir,
     });
+
+    let deployUrl = "";
+    let deploySuccess = false;
     if (flyResult.status === "SUCCESS" && flyResult.url) {
       await log(jobId, "SUCCESS", `[DEPLOY] Fly URL: ${flyResult.url}`);
       await log(jobId, "INFO", `[DEPLOY] Provider: fly`);
-    } else if (flyResult.url) {
-      await log(jobId, "INFO", `[WORKER] Fly result: ${flyResult.status} — ${flyResult.url}`);
+      deployUrl = flyResult.url;
+      deploySuccess = true;
+    } else {
+      const msg = flyResult.error || flyResult.status || "unknown";
+      await log(jobId, "ERROR", `[DEPLOY] Deployment failed: ${msg}`);
     }
 
-    await log(jobId, "SUCCESS", `[WORKER] Build complete for queue job ${queueJobId}`);
-    await prisma.job.update({ where: { id: jobId }, data: { status: "COMPLETED" } });
+    const hasTemplate = !!(spec?.templateKey);
+    let acceptancePassed = false;
+    if (deploySuccess && deployUrl) {
+      try {
+        const { runAcceptanceWithRetry, formatAcceptanceReport } = await import("../lib/acceptance-checks");
+        await log(jobId, "INFO", "[ACCEPTANCE] Starting acceptance checks...");
+        const acceptanceResult = await runAcceptanceWithRetry(deployUrl, jobId, hasTemplate);
+        const report = formatAcceptanceReport(acceptanceResult);
+        await log(jobId, "INFO", report);
+
+        if (acceptanceResult.passed) {
+          await log(jobId, "SUCCESS", `[DEPLOY] Live URL (Production): ${deployUrl}`);
+          acceptancePassed = true;
+        } else {
+          await log(jobId, "ERROR", `[DEPLOY] Deployment live but acceptance checks FAILED. URL: ${deployUrl}`);
+          await prisma.flyDeployment.updateMany({
+            where: { projectId },
+            data: { status: "ACCEPTANCE_FAILED" },
+          }).catch(() => {});
+        }
+      } catch (accErr) {
+        const msg = accErr instanceof Error ? accErr.message : String(accErr);
+        await log(jobId, "WARN", `[ACCEPTANCE] Error running checks: ${msg}`);
+      }
+    }
+
+    const jobStatus = acceptancePassed ? "COMPLETED" : "FAILED";
+    await log(jobId, acceptancePassed ? "SUCCESS" : "ERROR", `[WORKER] Build ${acceptancePassed ? "complete" : "failed"} for queue job ${queueJobId}`);
+    await prisma.job.update({ where: { id: jobId }, data: { status: jobStatus } });
     await prisma.buildQueueJob.update({
       where: { id: queueJobId },
-      data: { status: "SUCCESS", lockedAt: null },
+      data: { status: acceptancePassed ? "SUCCESS" : "FAILED", lockedAt: null },
     });
 
   } catch (err) {
