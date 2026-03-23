@@ -24,93 +24,119 @@ function getFlyRegion(): string {
 }
 
 function ensureFlyctl(): boolean {
-  const home = process.env.HOME || "/root";
-  console.log(`[DEPLOY] ensureFlyctl: checking... HOME=${home}, PATH=${(process.env.PATH || "").substring(0, 200)}`);
-
+  console.log("[DEPLOY] ensureFlyctl: v4-robust-download");
   process.env.PATH = `/usr/local/bin:/usr/bin:${process.env.PATH}`;
 
   try {
-    const result = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
-    if (result.status === 0) {
-      const ver = (result.stdout || "").trim().split("\n")[0];
-      console.log(`[DEPLOY] ensureFlyctl: already installed, flyctl version: ${ver}`);
+    const r = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+    if (r.status === 0) {
+      console.log(`[DEPLOY] ensureFlyctl: already installed — ${(r.stdout || "").trim().split("\n")[0]}`);
       return true;
     }
   } catch {}
 
-  console.log("[DEPLOY] ensureFlyctl: not found, installing via apt...");
-
+  console.log("[DEPLOY] ensureFlyctl: not found, installing prerequisites...");
   try {
-    console.log("[DEPLOY] ensureFlyctl: step 1 — apt-get update + install prerequisites...");
-    const step1 = execSync(
-      "apt-get update -qq 2>&1 && apt-get install -y -qq curl ca-certificates gnupg 2>&1",
-      { timeout: 120000, encoding: "utf-8" }
-    );
-    console.log(`[DEPLOY] ensureFlyctl: step 1 done (last 300): ${step1.slice(-300)}`);
-  } catch (err: unknown) {
-    const e = err as { stdout?: string; stderr?: string; message?: string };
-    console.error(`[DEPLOY] ensureFlyctl: step 1 failed: ${(e.stdout || "") + (e.stderr || "")}`.slice(0, 500));
+    execSync("apt-get update -qq 2>&1 && apt-get install -y -qq curl ca-certificates file 2>&1", { timeout: 120000, encoding: "utf-8" });
+    console.log("[DEPLOY] ensureFlyctl: curl+file installed");
+  } catch (e: unknown) {
+    console.error(`[DEPLOY] ensureFlyctl: apt failed: ${(e as Error).message || e}`);
   }
 
-  try {
-    console.log("[DEPLOY] ensureFlyctl: step 2 — download flyctl binary directly...");
-    const installCmds = [
-      'FLYCTL_VERSION=$(curl -sL https://api.github.com/repos/superfly/flyctl/releases/latest | grep -oP \'"tag_name":\\s*"v\\K[^"]+\' || echo "0.3.80")',
-      'echo "[DEPLOY] ensureFlyctl: latest version=$FLYCTL_VERSION"',
-      'curl -sL "https://github.com/superfly/flyctl/releases/download/v${FLYCTL_VERSION}/flyctl_${FLYCTL_VERSION}_Linux_x86_64.tar.gz" -o /tmp/flyctl.tar.gz',
-      'ls -la /tmp/flyctl.tar.gz',
-      'tar -xzf /tmp/flyctl.tar.gz -C /tmp flyctl',
-      'mv /tmp/flyctl /usr/local/bin/flyctl',
-      'chmod +x /usr/local/bin/flyctl',
-      'rm -f /tmp/flyctl.tar.gz',
-    ].join(" && ");
-
-    const step2 = execSync(installCmds, {
-      timeout: 120000,
-      encoding: "utf-8",
-      shell: "/bin/sh",
-    });
-    console.log(`[DEPLOY] ensureFlyctl: step 2 done (last 300): ${step2.slice(-300)}`);
-  } catch (err: unknown) {
-    const e = err as { stdout?: string; stderr?: string; message?: string };
-    const out = ((e.stdout || "") + (e.stderr || "")).slice(-500);
-    console.error(`[DEPLOY] ensureFlyctl: step 2 failed: ${out}`);
-    console.error(`[DEPLOY] ensureFlyctl: error: ${e.message || err}`);
-  }
-
-  try {
-    const result = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
-    if (result.status === 0) {
-      const ver = (result.stdout || "").trim().split("\n")[0];
-      console.log(`[DEPLOY] ensureFlyctl: installed via direct download`);
-      console.log(`[DEPLOY] ensureFlyctl: flyctl version: ${ver}`);
-      return true;
-    }
-    console.error(`[DEPLOY] ensureFlyctl: flyctl version check failed: exit=${result.status}, stderr=${(result.stderr || "").slice(0, 200)}`);
-  } catch (err) {
-    console.error(`[DEPLOY] ensureFlyctl: flyctl version check threw: ${err}`);
-  }
-
-  const candidatePaths = [
-    "/usr/local/bin/flyctl",
-    "/usr/bin/flyctl",
-    path.join(home, ".fly", "bin", "flyctl"),
-    "/root/.fly/bin/flyctl",
+  const downloadUrls = [
+    "https://github.com/superfly/flyctl/releases/latest/download/flyctl_Linux_x86_64.tar.gz",
+    "https://github.com/superfly/flyctl/releases/download/v0.3.98/flyctl_Linux_x86_64.tar.gz",
+    "https://fly.io/install.sh",
   ];
-  for (const p of candidatePaths) {
-    if (fs.existsSync(p)) {
-      console.log(`[DEPLOY] ensureFlyctl: found at ${p}`);
-      const result = spawnSync(p, ["version"], { timeout: 5000, encoding: "utf-8" });
-      if (result.status === 0) {
-        process.env.PATH = `${path.dirname(p)}:${process.env.PATH}`;
-        const ver = (result.stdout || "").trim().split("\n")[0];
-        console.log(`[DEPLOY] ensureFlyctl: flyctl version: ${ver}`);
-        return true;
+
+  for (const dlUrl of downloadUrls) {
+    const isInstallScript = dlUrl.endsWith("install.sh");
+    console.log(`[DEPLOY] ensureFlyctl: trying ${dlUrl}`);
+
+    try {
+      if (isInstallScript) {
+        try {
+          execSync(`curl -fL --retry 3 --retry-delay 2 "${dlUrl}" | sh`, {
+            timeout: 120000,
+            encoding: "utf-8",
+            env: { ...process.env, FLYCTL_INSTALL: "/usr/local" },
+          });
+        } catch {}
+        if (fs.existsSync("/usr/local/bin/flyctl")) {
+          const r = spawnSync("/usr/local/bin/flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+          if (r.status === 0) {
+            console.log(`[DEPLOY] ensureFlyctl: install.sh succeeded — ${(r.stdout || "").trim().split("\n")[0]}`);
+            return true;
+          }
+        }
+        const home = process.env.HOME || "/root";
+        const homeFly = path.join(home, ".fly", "bin", "flyctl");
+        if (fs.existsSync(homeFly)) {
+          const r = spawnSync(homeFly, ["version"], { timeout: 5000, encoding: "utf-8" });
+          if (r.status === 0) {
+            process.env.PATH = `${path.dirname(homeFly)}:${process.env.PATH}`;
+            console.log(`[DEPLOY] ensureFlyctl: install.sh to ~/.fly succeeded — ${(r.stdout || "").trim().split("\n")[0]}`);
+            return true;
+          }
+        }
+        console.log("[DEPLOY] ensureFlyctl: install.sh did not produce working flyctl");
+        continue;
       }
+
+      execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 });
+
+      try {
+        const headerOut = execSync(`curl -fIL --retry 2 --retry-delay 2 "${dlUrl}" 2>&1 | head -20`, {
+          timeout: 30000,
+          encoding: "utf-8",
+        });
+        console.log(`[DEPLOY] ensureFlyctl: headers:\n${headerOut.trim().split("\n").slice(0, 8).join("\n")}`);
+      } catch {}
+
+      execSync(`curl -fL --retry 3 --retry-delay 2 -o /tmp/flyctl.tar.gz "${dlUrl}"`, { timeout: 60000, encoding: "utf-8" });
+
+      const sizeOut = execSync("ls -lh /tmp/flyctl.tar.gz", { timeout: 5000, encoding: "utf-8" }).trim();
+      console.log(`[DEPLOY] ensureFlyctl: ${sizeOut}`);
+
+      let fileType = "unknown";
+      try {
+        fileType = execSync("file /tmp/flyctl.tar.gz", { timeout: 5000, encoding: "utf-8" }).trim();
+      } catch {
+        try {
+          const head = execSync("head -c 2 /tmp/flyctl.tar.gz | od -A x -t x1z | head -1", { timeout: 5000, encoding: "utf-8" }).trim();
+          fileType = head.includes("1f 8b") ? "gzip compressed" : `not-gzip (header: ${head})`;
+        } catch {}
+      }
+      console.log(`[DEPLOY] ensureFlyctl: file type: ${fileType}`);
+
+      if (!fileType.toLowerCase().includes("gzip") && !fileType.toLowerCase().includes("compressed")) {
+        try {
+          const preview = execSync("head -c 200 /tmp/flyctl.tar.gz", { timeout: 5000, encoding: "utf-8" });
+          console.error(`[DEPLOY] ensureFlyctl: NOT gzip! First 200 bytes: ${preview.slice(0, 200)}`);
+        } catch {}
+        console.error(`[DEPLOY] ensureFlyctl: skipping ${dlUrl} (not gzip)`);
+        continue;
+      }
+
+      console.log("[DEPLOY] ensureFlyctl: extracting to /tmp...");
+      execSync("tar -xzf /tmp/flyctl.tar.gz -C /tmp", { timeout: 30000, encoding: "utf-8" });
+
+      if (fs.existsSync("/tmp/flyctl")) {
+        execSync("mv /tmp/flyctl /usr/local/bin/flyctl && chmod +x /usr/local/bin/flyctl", { timeout: 5000 });
+        const r = spawnSync("/usr/local/bin/flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+        if (r.status === 0) {
+          console.log(`[DEPLOY] ensureFlyctl: flyctl version: ${(r.stdout || "").trim().split("\n")[0]}`);
+          return true;
+        }
+        console.error(`[DEPLOY] ensureFlyctl: version check failed exit=${r.status}`);
+      }
+    } catch (e: unknown) {
+      console.error(`[DEPLOY] ensureFlyctl: attempt failed for ${dlUrl}: ${(e as Error).message || e}`);
     }
   }
 
-  console.error("[DEPLOY] ensureFlyctl: all attempts failed — flyctl not available");
+  execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 }).toString();
+  console.error("[DEPLOY] ensureFlyctl: all download attempts failed");
   return false;
 }
 
