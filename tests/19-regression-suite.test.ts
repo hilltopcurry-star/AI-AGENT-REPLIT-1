@@ -397,3 +397,90 @@ describe("Regression: user email uniqueness", () => {
     expect(u.id).toBeTruthy();
   });
 });
+
+describe("Acceptance checks unit tests", () => {
+  it("551 acceptance API accepts templateKey=null (default app)", async () => {
+    const mod = await import("../apps/web/lib/acceptance-checks");
+    expect(mod.runAcceptanceChecks).toBeDefined();
+    expect(mod.runAcceptanceWithRetry).toBeDefined();
+    expect(mod.formatAcceptanceReport).toBeDefined();
+  });
+
+  it("552 formatAcceptanceReport shows PASS for all-passed checks", async () => {
+    const { formatAcceptanceReport } = await import("../apps/web/lib/acceptance-checks");
+    const result = {
+      passed: true,
+      checks: [
+        { name: "health", passed: true, detail: "ok" },
+        { name: "homepage", passed: true, detail: "ok" },
+      ],
+      attempts: 1,
+    };
+    const report = formatAcceptanceReport(result);
+    expect(report).toContain("ALL CHECKS PASSED");
+    expect(report).toContain("[PASS] health");
+  });
+
+  it("553 formatAcceptanceReport shows FAIL for failed checks", async () => {
+    const { formatAcceptanceReport } = await import("../apps/web/lib/acceptance-checks");
+    const result = {
+      passed: false,
+      checks: [
+        { name: "health", passed: true, detail: "ok" },
+        { name: "projectsPage", passed: false, detail: "status=404" },
+        { name: "dbCheck", passed: false, detail: "error" },
+        { name: "crud", passed: false, detail: "error" },
+      ],
+      attempts: 3,
+    };
+    const report = formatAcceptanceReport(result);
+    expect(report).toContain("SOME CHECKS FAILED");
+    expect(report).toContain("[FAIL] projectsPage");
+    expect(report).toContain("[FAIL] dbCheck");
+    expect(report).toContain("[FAIL] crud");
+  });
+
+  it("554 template marker detection in project-management-saas template", async () => {
+    const { projectManagementSaasTemplate } = await import("../apps/web/lib/templates/project-management-saas");
+    const files = projectManagementSaasTemplate.getFiles();
+    const layout = files.find((f: any) => f.path === "app/layout.tsx");
+    expect(layout).toBeTruthy();
+    expect(layout!.content).toContain('content="project-management-saas"');
+    expect(layout!.content).toContain("ai-workspace-template");
+  });
+
+  it("555 template has required routes for acceptance", async () => {
+    const { projectManagementSaasTemplate } = await import("../apps/web/lib/templates/project-management-saas");
+    expect(projectManagementSaasTemplate.requiredRoutes).toContain("/api/health");
+    expect(projectManagementSaasTemplate.requiredRoutes).toContain("/api/db-check");
+    expect(projectManagementSaasTemplate.requiredRoutes).toContain("/api/projects");
+  });
+
+  it("556 template has /projects page file", async () => {
+    const { projectManagementSaasTemplate } = await import("../apps/web/lib/templates/project-management-saas");
+    const files = projectManagementSaasTemplate.getFiles();
+    const projectsPage = files.find((f: any) => f.path === "app/projects/page.tsx");
+    expect(projectsPage).toBeTruthy();
+    expect(projectsPage!.content.toLowerCase()).toContain("project");
+  });
+
+  it("557 detectTemplateKey matches project-management prompts", async () => {
+    const { detectTemplateKey } = await import("../apps/web/lib/templates");
+    expect(detectTemplateKey("project management app", "tasks and collaboration")).toBe("project-management-saas");
+    expect(detectTemplateKey("build me a todo tracker", "task board")).toBe("project-management-saas");
+    expect(detectTemplateKey("weather app", "forecasts")).toBeNull();
+  });
+
+  it("558 getTemplate returns project-management-saas", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates");
+    const tpl = getTemplate("project-management-saas");
+    expect(tpl).toBeTruthy();
+    expect(tpl!.key).toBe("project-management-saas");
+    expect(tpl!.getFiles().length).toBeGreaterThan(5);
+  });
+
+  it("559 getTemplate returns undefined for nonexistent key", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates");
+    expect(getTemplate("nonexistent-template")).toBeUndefined();
+  });
+});

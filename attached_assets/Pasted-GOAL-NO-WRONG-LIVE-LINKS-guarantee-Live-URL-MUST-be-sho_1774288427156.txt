@@ -1,0 +1,39 @@
+GOAL: “NO WRONG LIVE LINKS” guarantee. Live URL MUST be shown/returned only when template-specific acceptance passes.
+
+A) Make acceptance gating depend on specJson.templateKey (NOT hasTemplate)
+1) Treat specJson.templateKey as the single source of truth.
+2) Update acceptance checks API to accept templateKey?: string | null.
+3) Update BOTH worker + job-runner to pass templateKey into acceptance.
+
+B) Template-specific acceptance for project-management-saas (STRICT)
+If templateKey === "project-management-saas", ALL of these MUST pass, otherwise FAIL the job and DO NOT show Live URL:
+1) GET /api/health -> { ok: true }
+2) GET /api/db-check -> { ok: true }
+3) GET /projects -> 200 AND verify template-specific content
+   - Preferred: verify deterministic marker in HTML:
+     <meta name="ai-workspace-template" content="project-management-saas" />
+     OR <main data-template="project-management-saas">
+   - If marker is not available, verify at least two strong signals, e.g. contains "Projects" AND contains "Create Project" (or another template-unique UI string)
+4) CRUD: create a project then a task via API (existing auth/seeded user flow), both must succeed.
+
+C) Add explicit acceptance logging (always print templateKey)
+Print logs like:
+[ACCEPTANCE] templateKey=<value>
+[ACCEPTANCE] projectsPage OK|FAIL
+[ACCEPTANCE] db-check OK|FAIL
+[ACCEPTANCE] crud OK|FAIL
+[ACCEPTANCE] result=PASS|FAIL checks=projectsPage:OK dbCheck:OK crud:FAIL
+
+D) Hard rule enforcement: FAIL => NO LIVE URL
+If any required acceptance check fails:
+- Mark job terminal status FAILED_ACCEPTANCE (or existing FAILED).
+- Ensure the API/UI never presents the Fly URL as the final “Live URL” result.
+Only return/show Live URL when acceptance PASSes.
+
+E) Retry timing for Fly startup
+Use retries: attempt2 after 15s, attempt3 after 30s.
+
+F) Tests
+Add/adjust tests:
+- With templateKey=project-management-saas and missing /projects -> acceptance FAIL.
+- With templateKey=project-management-saas and all checks OK -> PASS.

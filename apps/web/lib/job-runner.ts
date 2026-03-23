@@ -385,8 +385,7 @@ export async function runJob(jobId: string, projectId: string, userId?: string):
 
     let deploySuccess = false;
     let liveUrl = "";
-    const templateKeyVal = spec?.templateKey as string | undefined;
-    const hasTemplate = !!templateKeyVal;
+    const tplKey = (spec?.templateKey as string) || null;
     try {
       if (resolvedUserId) {
         await requireAndDeductCredits(resolvedUserId, getCostDeploy(), "deploy", jobId, projectId);
@@ -407,7 +406,7 @@ export async function runJob(jobId: string, projectId: string, userId?: string):
         deploySuccess = true;
       } else {
         await log(jobId, "INFO", "[ACCEPTANCE] Starting acceptance checks...");
-        const acceptanceResult = await runAcceptanceWithRetry(url, jobId, hasTemplate, 3, templateKeyVal);
+        const acceptanceResult = await runAcceptanceWithRetry(url, jobId, tplKey);
         const report = formatAcceptanceReport(acceptanceResult);
         await log(jobId, "INFO", report);
 

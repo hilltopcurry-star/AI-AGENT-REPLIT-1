@@ -20,7 +20,7 @@ async function logJob(jobId: string, level: string, message: string) {
   } catch {}
 }
 
-function httpGet(url: string, timeoutMs = 10000): Promise<{ status: number; body: string }> {
+function httpGet(url: string, timeoutMs = 15000): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith("https") ? https : http;
     const req = mod.get(url, { timeout: timeoutMs }, (res) => {
@@ -36,7 +36,7 @@ function httpGet(url: string, timeoutMs = 10000): Promise<{ status: number; body
 async function httpPost(
   url: string,
   data: Record<string, unknown>,
-  timeoutMs = 10000
+  timeoutMs = 15000
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
@@ -78,20 +78,7 @@ async function checkHealth(baseUrl: string): Promise<CheckResult> {
   }
 }
 
-async function checkDbConnection(baseUrl: string): Promise<CheckResult> {
-  try {
-    const { status, body } = await httpGet(`${baseUrl}/api/db-check`);
-    const parsed = JSON.parse(body);
-    if (status === 200 && parsed.ok === true) {
-      return { name: "db-check", passed: true, detail: "GET /api/db-check returned {ok:true}" };
-    }
-    return { name: "db-check", passed: false, detail: `status=${status} body=${body.slice(0, 200)}` };
-  } catch (e: any) {
-    return { name: "db-check", passed: false, detail: `error: ${e.message}` };
-  }
-}
-
-async function checkPageLoads(baseUrl: string): Promise<CheckResult> {
+async function checkHomepage(baseUrl: string): Promise<CheckResult> {
   try {
     const { status } = await httpGet(baseUrl);
     if (status === 200) {
@@ -103,24 +90,53 @@ async function checkPageLoads(baseUrl: string): Promise<CheckResult> {
   }
 }
 
-async function checkProjectsPage(baseUrl: string): Promise<CheckResult> {
+async function checkDbConnection(baseUrl: string): Promise<CheckResult> {
   try {
-    const { status, body } = await httpGet(`${baseUrl}/projects`);
-    if (status === 200) {
-      const hasProjectContent = body.toLowerCase().includes("project");
-      return {
-        name: "projects-page",
-        passed: true,
-        detail: `GET /projects returned 200 (has project content: ${hasProjectContent})`,
-      };
+    const { status, body } = await httpGet(`${baseUrl}/api/db-check`);
+    const parsed = JSON.parse(body);
+    if (status === 200 && parsed.ok === true) {
+      return { name: "dbCheck", passed: true, detail: "GET /api/db-check returned {ok:true}" };
     }
-    return { name: "projects-page", passed: false, detail: `status=${status}` };
+    return { name: "dbCheck", passed: false, detail: `status=${status} body=${body.slice(0, 200)}` };
   } catch (e: any) {
-    return { name: "projects-page", passed: false, detail: `error: ${e.message}` };
+    return { name: "dbCheck", passed: false, detail: `error: ${e.message}` };
   }
 }
 
-async function checkProjectTaskCreation(baseUrl: string): Promise<CheckResult> {
+async function checkProjectsPage(baseUrl: string, templateKey: string): Promise<CheckResult> {
+  try {
+    const { status, body } = await httpGet(`${baseUrl}/projects`);
+    if (status !== 200) {
+      return { name: "projectsPage", passed: false, detail: `GET /projects returned status=${status}` };
+    }
+
+    const lower = body.toLowerCase();
+    const hasMarker = lower.includes(`content="${templateKey}"`);
+    if (hasMarker) {
+      return { name: "projectsPage", passed: true, detail: `GET /projects 200 + template marker "${templateKey}" found` };
+    }
+
+    const signals = [
+      lower.includes("project"),
+      lower.includes("create") || lower.includes("new project"),
+      lower.includes("projecthub") || lower.includes("task"),
+    ];
+    const signalCount = signals.filter(Boolean).length;
+    if (signalCount >= 2) {
+      return { name: "projectsPage", passed: true, detail: `GET /projects 200 + ${signalCount} template signals found` };
+    }
+
+    return {
+      name: "projectsPage",
+      passed: false,
+      detail: `GET /projects 200 but no template marker and only ${signalCount}/2 signals. Not the correct template.`,
+    };
+  } catch (e: any) {
+    return { name: "projectsPage", passed: false, detail: `error: ${e.message}` };
+  }
+}
+
+async function checkCrud(baseUrl: string): Promise<CheckResult> {
   try {
     const projRes = await httpPost(`${baseUrl}/api/projects`, {
       name: "Smoke Test Project",
@@ -163,55 +179,47 @@ async function checkProjectTaskCreation(baseUrl: string): Promise<CheckResult> {
 export async function runAcceptanceChecks(
   baseUrl: string,
   jobId: string,
-  hasTemplate: boolean,
-  templateKey?: string
+  templateKey: string | null
 ): Promise<CheckResult[]> {
-  await logJob(jobId, "INFO", `[ACCEPTANCE] templateKey=${templateKey || "none"} hasTemplate=${hasTemplate}`);
+  await logJob(jobId, "INFO", `[ACCEPTANCE] templateKey=${templateKey || "none"}`);
   await logJob(jobId, "INFO", `[ACCEPTANCE] Running checks against ${baseUrl}`);
 
   const checks: CheckResult[] = [];
 
   const healthResult = await checkHealth(baseUrl);
   checks.push(healthResult);
-  await logJob(jobId, healthResult.passed ? "SUCCESS" : "ERROR", `[ACCEPTANCE] ${healthResult.name}: ${healthResult.detail}`);
+  await logJob(jobId, healthResult.passed ? "SUCCESS" : "ERROR",
+    `[ACCEPTANCE] health ${healthResult.passed ? "OK" : "FAIL"}: ${healthResult.detail}`);
 
-  const pageResult = await checkPageLoads(baseUrl);
+  const pageResult = await checkHomepage(baseUrl);
   checks.push(pageResult);
-  await logJob(jobId, pageResult.passed ? "SUCCESS" : "ERROR", `[ACCEPTANCE] ${pageResult.name}: ${pageResult.detail}`);
+  await logJob(jobId, pageResult.passed ? "SUCCESS" : "ERROR",
+    `[ACCEPTANCE] homepage ${pageResult.passed ? "OK" : "FAIL"}: ${pageResult.detail}`);
 
-  if (hasTemplate) {
-    const projectsPageResult = await checkProjectsPage(baseUrl);
-    checks.push(projectsPageResult);
-    const lvl = projectsPageResult.passed ? "SUCCESS" : "ERROR";
-    await logJob(jobId, lvl, `[ACCEPTANCE] ${projectsPageResult.name}: ${projectsPageResult.detail}`);
-    if (projectsPageResult.passed) {
-      await logJob(jobId, "SUCCESS", "[ACCEPTANCE] projects page OK");
-    }
+  if (templateKey) {
+    const projectsResult = await checkProjectsPage(baseUrl, templateKey);
+    checks.push(projectsResult);
+    await logJob(jobId, projectsResult.passed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] projectsPage ${projectsResult.passed ? "OK" : "FAIL"}: ${projectsResult.detail}`);
 
     const dbResult = await checkDbConnection(baseUrl);
     checks.push(dbResult);
-    await logJob(jobId, dbResult.passed ? "SUCCESS" : "ERROR", `[ACCEPTANCE] ${dbResult.name}: ${dbResult.detail}`);
-    if (dbResult.passed) {
-      await logJob(jobId, "SUCCESS", "[ACCEPTANCE] db-check OK");
-    }
+    await logJob(jobId, dbResult.passed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] db-check ${dbResult.passed ? "OK" : "FAIL"}: ${dbResult.detail}`);
 
-    const crudResult = await checkProjectTaskCreation(baseUrl);
+    const crudResult = await checkCrud(baseUrl);
     checks.push(crudResult);
-    await logJob(jobId, crudResult.passed ? "SUCCESS" : "ERROR", `[ACCEPTANCE] ${crudResult.name}: ${crudResult.detail}`);
-    if (crudResult.passed) {
-      await logJob(jobId, "SUCCESS", "[ACCEPTANCE] crud OK");
-    }
+    await logJob(jobId, crudResult.passed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] crud ${crudResult.passed ? "OK" : "FAIL"}: ${crudResult.detail}`);
 
-    const templateChecksPassed = projectsPageResult.passed && dbResult.passed && crudResult.passed;
-    if (!templateChecksPassed) {
-      const failed = [projectsPageResult, dbResult, crudResult].filter(c => !c.passed).map(c => c.name).join(", ");
-      await logJob(jobId, "ERROR", `[ACCEPTANCE] Template checks FAILED (${failed}). This is NOT the correct template app.`);
-    }
+    const summary = `projectsPage:${projectsResult.passed ? "OK" : "FAIL"} dbCheck:${dbResult.passed ? "OK" : "FAIL"} crud:${crudResult.passed ? "OK" : "FAIL"}`;
+    const allTemplatePassed = projectsResult.passed && dbResult.passed && crudResult.passed;
+    await logJob(jobId, allTemplatePassed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] result=${allTemplatePassed ? "PASS" : "FAIL"} checks=${summary}`);
   }
 
   const passedCount = checks.filter((c) => c.passed).length;
-  const totalCount = checks.length;
-  await logJob(jobId, "INFO", `[ACCEPTANCE] Result: ${passedCount}/${totalCount} checks passed`);
+  await logJob(jobId, "INFO", `[ACCEPTANCE] Result: ${passedCount}/${checks.length} checks passed`);
 
   return checks;
 }
@@ -219,21 +227,22 @@ export async function runAcceptanceChecks(
 export async function runAcceptanceWithRetry(
   baseUrl: string,
   jobId: string,
-  hasTemplate: boolean,
-  maxAttempts = 3,
-  templateKey?: string
+  templateKey: string | null,
+  maxAttempts = 3
 ): Promise<AcceptanceResult> {
   let lastChecks: CheckResult[] = [];
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await logJob(jobId, "INFO", `[ACCEPTANCE] Attempt ${attempt}/${maxAttempts}`);
 
-    if (attempt > 1) {
-      const waitSec = attempt === 2 ? 15 : 30;
-      await logJob(jobId, "INFO", `[ACCEPTANCE] Waiting ${waitSec}s before retry...`);
-      await new Promise((r) => setTimeout(r, waitSec * 1000));
+    if (attempt === 2) {
+      await logJob(jobId, "INFO", "[ACCEPTANCE] Waiting 15s before retry...");
+      await new Promise((r) => setTimeout(r, 15000));
+    } else if (attempt > 2) {
+      await logJob(jobId, "INFO", "[ACCEPTANCE] Waiting 30s before retry...");
+      await new Promise((r) => setTimeout(r, 30000));
     }
 
-    lastChecks = await runAcceptanceChecks(baseUrl, jobId, hasTemplate, templateKey);
+    lastChecks = await runAcceptanceChecks(baseUrl, jobId, templateKey);
     const allPassed = lastChecks.every((c) => c.passed);
 
     if (allPassed) {

@@ -349,14 +349,13 @@ async function processQueueJob(queueJob: {
       await log(jobId, "ERROR", `[DEPLOY] Deployment failed: ${msg}`);
     }
 
-    const templateKey = spec?.templateKey as string | undefined;
-    const hasTemplate = !!templateKey;
+    const tplKey = (spec?.templateKey as string) || null;
     let acceptancePassed = false;
     if (deploySuccess && deployUrl) {
       try {
         const { runAcceptanceWithRetry, formatAcceptanceReport } = await import("../lib/acceptance-checks");
-        await log(jobId, "INFO", "[ACCEPTANCE] Starting acceptance checks...");
-        const acceptanceResult = await runAcceptanceWithRetry(deployUrl, jobId, hasTemplate, 3, templateKey);
+        await log(jobId, "INFO", `[ACCEPTANCE] Starting acceptance checks... templateKey=${tplKey || "none"}`);
+        const acceptanceResult = await runAcceptanceWithRetry(deployUrl, jobId, tplKey);
         const report = formatAcceptanceReport(acceptanceResult);
         await log(jobId, "INFO", report);
 

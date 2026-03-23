@@ -169,6 +169,9 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        <meta name="ai-workspace-template" content="project-management-saas" />
+      </head>
       <body>
         <nav>
           <div className="container">
