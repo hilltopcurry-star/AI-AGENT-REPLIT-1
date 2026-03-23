@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import * as fs from "fs";
 import * as path from "path";
 import { spawn, spawnSync, ChildProcess, execSync } from "child_process";
+import { getTemplate } from "../lib/templates";
 
 const prisma = new PrismaClient();
 const WORKER_ID = process.env.WORKER_ID || `worker-${process.pid}`;
@@ -131,25 +132,25 @@ function generateScaffold(workspaceDir: string, spec: Record<string, unknown> | 
   };
 
   const templateKey = spec?.templateKey as string | undefined;
+  console.log(`[SCAFFOLD] templateKey=${templateKey || "none"}`);
+
   if (templateKey) {
-    try {
-      const { getTemplate } = require("../lib/templates");
-      const template = getTemplate(templateKey);
-      if (template) {
-        console.log(`[WORKER] Using template: ${templateKey}`);
-        const pkgJson = template.getPackageJson();
-        writeFile("package.json", JSON.stringify(pkgJson, null, 2));
-        const files = template.getFiles();
-        for (const f of files) {
-          writeFile(f.path, f.content);
-        }
-        return;
-      }
-    } catch (e) {
-      console.log(`[WORKER] Template load failed (${templateKey}), using default scaffold: ${e}`);
+    const template = getTemplate(templateKey);
+    if (!template) {
+      throw new Error(`[SCAFFOLD] FATAL: templateKey="${templateKey}" set but template not found in registry. Failing build.`);
     }
+    console.log(`[SCAFFOLD] Using template: ${templateKey}`);
+    const pkgJson = template.getPackageJson();
+    writeFile("package.json", JSON.stringify(pkgJson, null, 2));
+    const files = template.getFiles();
+    for (const f of files) {
+      writeFile(f.path, f.content);
+    }
+    console.log(`[SCAFFOLD] Wrote template files: ${files.length + 1}`);
+    return;
   }
 
+  console.log("[SCAFFOLD] Using default scaffold");
   const purpose = String(spec?.purpose || "web application").slice(0, 200);
   const features = String(spec?.features || "basic features").slice(0, 200);
 

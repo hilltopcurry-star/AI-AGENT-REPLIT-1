@@ -1,4 +1,4 @@
-import { registerTemplate, TemplateFile } from "./index";
+import type { TemplateFile, TemplateDefinition } from "./index";
 
 function getFiles(): TemplateFile[] {
   return [
@@ -626,7 +626,7 @@ function getPackageJson(): Record<string, unknown> {
   };
 }
 
-registerTemplate({
+export const projectManagementSaasTemplate: TemplateDefinition = {
   key: "project-management-saas",
   name: "Project Management SaaS",
   description:
@@ -661,4 +661,4 @@ registerTemplate({
   requiredEntities: ["User", "Project", "Task", "Comment"],
   getFiles,
   getPackageJson,
-});
+};

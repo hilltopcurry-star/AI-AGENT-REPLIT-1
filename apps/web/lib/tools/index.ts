@@ -56,6 +56,11 @@ const saveProjectSpec: Tool = {
       spec.requiredModules = template.requiredModules;
       spec.requiredRoutes = template.requiredRoutes;
       spec.requiredEntities = template.requiredEntities;
+      console.log(`[SPEC] detected templateKey=${templateKey}`);
+      console.log(`[SPEC] requiredRoutes=${template.requiredRoutes.length}`);
+      console.log(`[SPEC] requiredEntities=${template.requiredEntities.join(",")}`);
+    } else {
+      console.log(`[SPEC] no template detected for purpose="${purpose.slice(0, 60)}"`);
     }
 
     await prisma.project.update({

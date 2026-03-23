@@ -5,6 +5,7 @@ import * as path from "path";
 import { deployWorkspace } from "./deployer";
 import { requireAndDeductCredits, getCostDeploy, InsufficientCreditsError } from "./credits";
 import { runAcceptanceWithRetry, formatAcceptanceReport } from "./acceptance-checks";
+import { getTemplate } from "./templates";
 
 const WORKSPACES_ROOT = "/tmp/workspaces";
 const INSTALL_TIMEOUT = 5 * 60 * 1000;
@@ -62,22 +63,25 @@ function sanitizeSpecString(value: unknown, fallback: string, maxLength = 200): 
 
 function generateScaffold(workspaceDir: string, spec: Record<string, unknown> | null) {
   const templateKey = spec?.templateKey as string | undefined;
+  console.log(`[SCAFFOLD] templateKey=${templateKey || "none"}`);
+
   if (templateKey) {
-    try {
-      const { getTemplate } = require("./templates");
-      const template = getTemplate(templateKey);
-      if (template) {
-        const pkgJson = template.getPackageJson();
-        writeFile(workspaceDir, "package.json", JSON.stringify(pkgJson, null, 2));
-        const files = template.getFiles();
-        for (const f of files) {
-          writeFile(workspaceDir, f.path, f.content);
-        }
-        return;
-      }
-    } catch {}
+    const template = getTemplate(templateKey);
+    if (!template) {
+      throw new Error(`[SCAFFOLD] FATAL: templateKey="${templateKey}" set but template not found in registry. Failing build.`);
+    }
+    console.log(`[SCAFFOLD] Using template: ${templateKey}`);
+    const pkgJson = template.getPackageJson();
+    writeFile(workspaceDir, "package.json", JSON.stringify(pkgJson, null, 2));
+    const files = template.getFiles();
+    for (const f of files) {
+      writeFile(workspaceDir, f.path, f.content);
+    }
+    console.log(`[SCAFFOLD] Wrote template files: ${files.length + 1}`);
+    return;
   }
 
+  console.log("[SCAFFOLD] Using default scaffold");
   const rawPurpose = sanitizeSpecString(spec?.purpose, "web application");
   const rawFeatures = sanitizeSpecString(spec?.features, "basic features");
   const purpose = escapeForJsx(rawPurpose);
