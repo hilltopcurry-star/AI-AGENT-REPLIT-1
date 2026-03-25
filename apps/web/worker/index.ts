@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { spawn, spawnSync, ChildProcess, execSync } from "child_process";
 import { getTemplate } from "../lib/templates";
+import { getSpecLogLines, specHasComplexApp, MIN_FILES_FOR_COMPLEX_APP } from "../lib/spec-logger";
 
 const prisma = new PrismaClient();
 const WORKER_ID = process.env.WORKER_ID || `worker-${process.pid}`;
@@ -183,6 +184,20 @@ function runCommand(
   });
 }
 
+function countFilesRecursive(dir: string): number {
+  let count = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "node_modules" || entry.name === ".npm-cache") continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      count += countFilesRecursive(full);
+    } else {
+      count++;
+    }
+  }
+  return count;
+}
+
 function generateScaffold(workspaceDir: string, spec: Record<string, unknown> | null) {
   const writeFile = (rel: string, content: string) => {
     const full = path.join(workspaceDir, rel);
@@ -273,6 +288,18 @@ async function processQueueJob(queueJob: {
     const project = await prisma.project.findUnique({ where: { id: projectId } });
     const spec = project?.specJson as Record<string, unknown> | null;
 
+    const specLines = getSpecLogLines(spec);
+    await log(jobId, "INFO", specLines.templateKey);
+    await log(jobId, "INFO", specLines.title);
+    await log(jobId, "INFO", specLines.requiredRoutes);
+    await log(jobId, "INFO", specLines.specJson);
+
+    if (!spec) {
+      await log(jobId, "ERROR", "[SPEC] ERROR Missing specJson; refusing to scaffold/deploy");
+      await prisma.job.update({ where: { id: jobId }, data: { status: "FAILED" } });
+      throw new Error("[SPEC] ERROR Missing specJson");
+    }
+
     await fs.promises.mkdir(WORKSPACES_ROOT, { recursive: true });
     const workspaceDir = path.join(WORKSPACES_ROOT, queueJobId);
     if (fs.existsSync(workspaceDir)) {
@@ -281,8 +308,17 @@ async function processQueueJob(queueJob: {
     await fs.promises.mkdir(workspaceDir, { recursive: true });
 
     await log(jobId, "INFO", "[WORKER] Generating scaffold...");
+    await log(jobId, "INFO", specLines.templateKey);
     generateScaffold(workspaceDir, spec);
-    await log(jobId, "SUCCESS", "[WORKER] Scaffold generated");
+
+    const scaffoldFiles = countFilesRecursive(workspaceDir);
+    await log(jobId, "SUCCESS", `[WORKER] Scaffold generated: ${scaffoldFiles} files`);
+
+    if (specHasComplexApp(spec) && scaffoldFiles < MIN_FILES_FOR_COMPLEX_APP) {
+      await log(jobId, "ERROR", `[SCAFFOLD] ERROR Scaffold too small for requested spec (${scaffoldFiles} files < ${MIN_FILES_FOR_COMPLEX_APP}); refusing to deploy`);
+      await prisma.job.update({ where: { id: jobId }, data: { status: "FAILED" } });
+      throw new Error("[SCAFFOLD] ERROR Scaffold too small for requested spec");
+    }
 
     await log(jobId, "INFO", "[WORKER] Step 1/2: npm install...");
     const installResult = await runCommand(

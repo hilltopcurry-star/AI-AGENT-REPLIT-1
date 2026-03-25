@@ -6,6 +6,7 @@ import { deployWorkspace } from "./deployer";
 import { requireAndDeductCredits, getCostDeploy, InsufficientCreditsError } from "./credits";
 import { runAcceptanceWithRetry, formatAcceptanceReport } from "./acceptance-checks";
 import { getTemplate } from "./templates";
+import { getSpecLogLines, specHasComplexApp, MIN_FILES_FOR_COMPLEX_APP } from "./spec-logger";
 
 const WORKSPACES_ROOT = "/tmp/workspaces";
 const INSTALL_TIMEOUT = 5 * 60 * 1000;
@@ -297,6 +298,19 @@ export async function runJob(jobId: string, projectId: string, userId?: string):
     const project = await prisma.project.findUnique({ where: { id: projectId } });
     const spec = project?.specJson as Record<string, unknown> | null;
 
+    const specLines = getSpecLogLines(spec);
+    await log(jobId, "INFO", specLines.templateKey);
+    await log(jobId, "INFO", specLines.title);
+    await log(jobId, "INFO", specLines.requiredRoutes);
+    await log(jobId, "INFO", specLines.specJson);
+
+    if (!spec) {
+      await log(jobId, "ERROR", "[SPEC] ERROR Missing specJson; refusing to scaffold/deploy");
+      await prisma.job.update({ where: { id: jobId }, data: { status: "FAILED" } });
+      clearTimeout(totalTimer);
+      return;
+    }
+
     await fs.promises.mkdir(WORKSPACES_ROOT, { recursive: true });
     await log(jobId, "INFO", `[RUNNER] Ensured workspace root: ${WORKSPACES_ROOT}`);
 
@@ -309,12 +323,20 @@ export async function runJob(jobId: string, projectId: string, userId?: string):
     await fs.promises.mkdir(workspaceDir, { recursive: true });
 
     await log(jobId, "INFO", "[RUNNER] Generating project scaffold from specJson...");
+    await log(jobId, "INFO", specLines.templateKey);
     generateScaffold(workspaceDir, spec);
 
     const files = listFilesRecursive(workspaceDir, workspaceDir);
     await log(jobId, "SUCCESS", `[RUNNER] Scaffold generated: ${files.length} files`);
     for (const f of files) {
       await log(jobId, "INFO", `[RUNNER]   ${f}`);
+    }
+
+    if (specHasComplexApp(spec) && files.length < MIN_FILES_FOR_COMPLEX_APP) {
+      await log(jobId, "ERROR", `[SCAFFOLD] ERROR Scaffold too small for requested spec (${files.length} files < ${MIN_FILES_FOR_COMPLEX_APP}); refusing to deploy`);
+      await prisma.job.update({ where: { id: jobId }, data: { status: "FAILED" } });
+      clearTimeout(totalTimer);
+      return;
     }
 
     await log(jobId, "INFO", "[RUNNER] Step 1/2: Running npm install...");

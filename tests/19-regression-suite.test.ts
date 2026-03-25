@@ -484,3 +484,104 @@ describe("Acceptance checks unit tests", () => {
     expect(getTemplate("nonexistent-template")).toBeUndefined();
   });
 });
+
+describe("Spec logger + redaction + safety gates", () => {
+  it("560 redactSpec removes sensitive keys", async () => {
+    const { redactSpec } = await import("../apps/web/lib/spec-logger");
+    const result = redactSpec({
+      title: "My App",
+      apiKey: "sk-1234",
+      DATABASE_URL: "postgres://secret",
+      nested: { password: "hunter2", safe: "ok" },
+    });
+    expect(result.title).toBe("My App");
+    expect(result.apiKey).toBe("[REDACTED]");
+    expect(result.DATABASE_URL).toBe("[REDACTED]");
+    expect((result.nested as any).password).toBe("[REDACTED]");
+    expect((result.nested as any).safe).toBe("ok");
+  });
+
+  it("561 redactSpec handles null/undefined", async () => {
+    const { redactSpec } = await import("../apps/web/lib/spec-logger");
+    expect(redactSpec(null)).toEqual({});
+    expect(redactSpec(undefined)).toEqual({});
+  });
+
+  it("562 getSpecLogLines produces correct format", async () => {
+    const { getSpecLogLines } = await import("../apps/web/lib/spec-logger");
+    const lines = getSpecLogLines({
+      templateKey: "project-management-saas",
+      title: "ProjectHub",
+      requiredRoutes: ["/api/health", "/api/projects"],
+      apiKey: "secret",
+    });
+    expect(lines.templateKey).toBe("[SPEC] templateKey=project-management-saas");
+    expect(lines.title).toBe("[SPEC] title=ProjectHub");
+    expect(lines.requiredRoutes).toBe('[SPEC] requiredRoutes=["/api/health","/api/projects"]');
+    expect(lines.specJson).toContain("[SPEC] specJson=");
+    expect(lines.specJson).toContain('"[REDACTED]"');
+    expect(lines.specJson).not.toContain("secret");
+  });
+
+  it("563 getSpecLogLines handles null spec", async () => {
+    const { getSpecLogLines } = await import("../apps/web/lib/spec-logger");
+    const lines = getSpecLogLines(null);
+    expect(lines.templateKey).toBe("[SPEC] templateKey=none");
+    expect(lines.title).toBe("[SPEC] title=none");
+    expect(lines.requiredRoutes).toBe("[SPEC] requiredRoutes=[]");
+  });
+
+  it("564 specHasComplexApp detects templateKey", async () => {
+    const { specHasComplexApp } = await import("../apps/web/lib/spec-logger");
+    expect(specHasComplexApp({ templateKey: "project-management-saas" })).toBe(true);
+    expect(specHasComplexApp(null)).toBe(false);
+    expect(specHasComplexApp({})).toBe(false);
+  });
+
+  it("565 specHasComplexApp detects requiredRoutes", async () => {
+    const { specHasComplexApp } = await import("../apps/web/lib/spec-logger");
+    expect(specHasComplexApp({ requiredRoutes: ["/api/health"] })).toBe(true);
+    expect(specHasComplexApp({ requiredRoutes: [] })).toBe(false);
+  });
+
+  it("566 specHasComplexApp detects entities", async () => {
+    const { specHasComplexApp } = await import("../apps/web/lib/spec-logger");
+    expect(specHasComplexApp({ requiredEntities: ["Project", "Task"] })).toBe(true);
+  });
+
+  it("567 specHasComplexApp detects long features", async () => {
+    const { specHasComplexApp } = await import("../apps/web/lib/spec-logger");
+    expect(specHasComplexApp({ features: "a".repeat(21) })).toBe(true);
+    expect(specHasComplexApp({ features: "short" })).toBe(false);
+  });
+
+  it("568 MIN_FILES_FOR_COMPLEX_APP is at least 10", async () => {
+    const { MIN_FILES_FOR_COMPLEX_APP } = await import("../apps/web/lib/spec-logger");
+    expect(MIN_FILES_FOR_COMPLEX_APP).toBeGreaterThanOrEqual(10);
+  });
+
+  it("569 redactSpec preserves arrays", async () => {
+    const { redactSpec } = await import("../apps/web/lib/spec-logger");
+    const result = redactSpec({
+      requiredRoutes: ["/api/health", "/api/projects"],
+      tags: ["web", "saas"],
+    });
+    expect(result.requiredRoutes).toEqual(["/api/health", "/api/projects"]);
+    expect(result.tags).toEqual(["web", "saas"]);
+  });
+
+  it("570 redactSpec handles all secret key variants", async () => {
+    const { redactSpec } = await import("../apps/web/lib/spec-logger");
+    const result = redactSpec({
+      STRIPE_SECRET_KEY: "sk_test",
+      STRIPE_WEBHOOK_SECRET: "whsec_test",
+      flyToken: "fly-token",
+      GITHUB_PAT: "ghp_test",
+      openaiApiKey: "sk-proj-abc",
+      accessToken: "bearer-xyz",
+    });
+    for (const val of Object.values(result)) {
+      expect(val).toBe("[REDACTED]");
+    }
+  });
+});
