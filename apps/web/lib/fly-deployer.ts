@@ -343,25 +343,44 @@ export async function createDockerContext(
     ? "COPY --from=builder /app/public ./public"
     : "RUN mkdir -p ./public";
 
+  const hasPrisma = fs.existsSync(path.join(workspacePath, "prisma", "schema.prisma"));
+  const prismaBuilderLines = hasPrisma
+    ? `RUN apk add --no-cache openssl libc6-compat
+RUN npx prisma generate`
+    : "";
+  const prismaRunnerLines = hasPrisma
+    ? `RUN apk add --no-cache openssl libc6-compat
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma`
+    : "";
+  const startCmd = hasPrisma
+    ? `CMD ["sh", "-c", "npx prisma migrate deploy 2>/dev/null || npx prisma db push --accept-data-loss 2>/dev/null; node server.js"]`
+    : `CMD ["node", "server.js"]`;
+
   const dockerfile = `FROM node:20-alpine AS builder
 WORKDIR /app
+${hasPrisma ? "RUN apk add --no-cache openssl libc6-compat" : ""}
 COPY package.json package-lock.json* ./
 RUN npm ci --no-audit --no-fund
 COPY . .
+${hasPrisma ? "RUN npx prisma generate" : ""}
 RUN npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+${hasPrisma ? "RUN apk add --no-cache openssl libc6-compat" : ""}
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 ${publicCopyLine}
+${hasPrisma ? "COPY --from=builder /app/prisma ./prisma\nCOPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma\nCOPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma" : ""}
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
-CMD ["node", "server.js"]
+${startCmd}
 `;
 
   const dockerfilePath = path.join(workspacePath, "Dockerfile");

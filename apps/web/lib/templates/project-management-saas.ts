@@ -6,11 +6,12 @@ function getFiles(): TemplateFile[] {
       path: "prisma/schema.prisma",
       content: `generator client {
   provider = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -608,7 +609,7 @@ function getPackageJson(): Record<string, unknown> {
     private: true,
     scripts: {
       dev: "next dev",
-      build: "prisma generate && prisma db push --accept-data-loss && next build",
+      build: "prisma generate && next build",
       start: "next start",
       seed: "tsx lib/seed.ts",
     },

@@ -422,27 +422,22 @@ export async function runJob(jobId: string, projectId: string, userId?: string):
       liveUrl = url;
 
       const isProxyUrl = url.includes("/api/deployments/") && url.includes("/proxy");
-      if (isProxyUrl) {
-        await log(jobId, "INFO", "[ACCEPTANCE] Skipping acceptance checks for proxy deployment (requires auth)");
+      await log(jobId, "INFO", `[ACCEPTANCE] Starting acceptance checks... (proxy=${isProxyUrl})`);
+      const acceptanceResult = await runAcceptanceWithRetry(url, jobId, tplKey);
+      const report = formatAcceptanceReport(acceptanceResult);
+      await log(jobId, "INFO", report);
+
+      if (acceptanceResult.passed) {
         await log(jobId, "SUCCESS", `[DEPLOY] Live URL (Production): ${url}`);
         deploySuccess = true;
       } else {
-        await log(jobId, "INFO", "[ACCEPTANCE] Starting acceptance checks...");
-        const acceptanceResult = await runAcceptanceWithRetry(url, jobId, tplKey);
-        const report = formatAcceptanceReport(acceptanceResult);
-        await log(jobId, "INFO", report);
-
-        if (acceptanceResult.passed) {
-          await log(jobId, "SUCCESS", `[DEPLOY] Live URL (Production): ${url}`);
-          deploySuccess = true;
-        } else {
-          await log(jobId, "ERROR", `[DEPLOY] Deployment live but acceptance checks FAILED. URL: ${url}`);
-          await prisma.deployment.updateMany({
-            where: { jobId },
-            data: { status: "FAILED", error: "Acceptance checks failed" },
-          });
-          deploySuccess = false;
-        }
+        await log(jobId, "ERROR", `[DEPLOY] Deployment live but acceptance checks FAILED. URL NOT promoted to Production.`);
+        await log(jobId, "INFO", `[DEPLOY] Unverified URL (do not present as Live): ${url}`);
+        await prisma.deployment.updateMany({
+          where: { jobId },
+          data: { status: "FAILED", error: "Acceptance checks failed" },
+        });
+        deploySuccess = false;
       }
     } catch (deployError) {
       if (deployError instanceof InsufficientCreditsError) {
