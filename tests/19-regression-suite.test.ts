@@ -681,3 +681,52 @@ describe("Template route handler params safety", () => {
     expect(source).toContain("taskRes.body.slice");
   });
 });
+
+describe("ensureFlyctl pinned version", () => {
+  it("582 worker ensureFlyctl uses pinned version, no /latest/download URL", async () => {
+    const source = await import("fs").then(f => f.readFileSync("apps/web/worker/index.ts", "utf-8"));
+    expect(source).toContain("FLYCTL_VERSION");
+    expect(source).toContain("v5-pinned");
+    expect(source).not.toContain("releases/latest/download");
+    const match = source.match(/FLYCTL_VERSION\s*=\s*"([^"]+)"/);
+    expect(match).toBeTruthy();
+    expect(match![1]).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  it("583 fly-deployer ensureFlyctl uses pinned version, no /latest/download URL", async () => {
+    const source = await import("fs").then(f => f.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8"));
+    expect(source).toContain("FLYCTL_VERSION");
+    expect(source).toContain("v5-pinned");
+    expect(source).not.toContain("releases/latest/download");
+    const match = source.match(/FLYCTL_VERSION\s*=\s*"([^"]+)"/);
+    expect(match).toBeTruthy();
+    expect(match![1]).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  it("584 worker download URL uses tagged version format", async () => {
+    const source = await import("fs").then(f => f.readFileSync("apps/web/worker/index.ts", "utf-8"));
+    expect(source).toContain("releases/download/v${FLYCTL_VERSION}");
+    expect(source).toContain("flyctl_${FLYCTL_VERSION}_Linux_x86_64.tar.gz");
+  });
+
+  it("585 fly-deployer download URL uses tagged version format", async () => {
+    const source = await import("fs").then(f => f.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8"));
+    expect(source).toContain("releases/download/v${FLYCTL_VERSION}");
+    expect(source).toContain("flyctl_${FLYCTL_VERSION}_Linux_x86_64.tar.gz");
+  });
+
+  it("586 both files use same FLYCTL_VERSION value", async () => {
+    const workerSrc = await import("fs").then(f => f.readFileSync("apps/web/worker/index.ts", "utf-8"));
+    const deploySrc = await import("fs").then(f => f.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8"));
+    const wMatch = workerSrc.match(/FLYCTL_VERSION\s*=\s*"([^"]+)"/);
+    const dMatch = deploySrc.match(/FLYCTL_VERSION\s*=\s*"([^"]+)"/);
+    expect(wMatch![1]).toBe(dMatch![1]);
+  });
+
+  it("587 install.sh fallback still present as last resort", async () => {
+    const workerSrc = await import("fs").then(f => f.readFileSync("apps/web/worker/index.ts", "utf-8"));
+    const deploySrc = await import("fs").then(f => f.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8"));
+    expect(workerSrc).toContain("https://fly.io/install.sh");
+    expect(deploySrc).toContain("https://fly.io/install.sh");
+  });
+});
