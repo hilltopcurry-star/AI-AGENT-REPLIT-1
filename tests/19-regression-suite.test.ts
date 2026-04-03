@@ -758,3 +758,58 @@ describe("specJson string parsing", () => {
     expect(source).toContain("JSON.parse(project.specJson)");
   });
 });
+
+describe("Proxy acceptance token auth", () => {
+  it("591 acceptance-token requires INTERNAL_ACCEPTANCE_TOKEN env var (no auto-generate)", async () => {
+    const source = await import("fs").then(f => f.readFileSync("apps/web/lib/acceptance-token.ts", "utf-8"));
+    expect(source).toContain("process.env.INTERNAL_ACCEPTANCE_TOKEN");
+    expect(source).toContain("isValidAcceptanceToken");
+    expect(source).toContain("timingSafeEqual");
+    expect(source).not.toContain("randomBytes");
+    expect(source).toContain("INTERNAL_ACCEPTANCE_TOKEN env var is not set");
+  });
+
+  it("592 proxy route checks x-internal-acceptance-token header", async () => {
+    const source = await import("fs").then(f =>
+      f.readFileSync("apps/web/app/api/deployments/[deploymentId]/proxy/route.ts", "utf-8")
+    );
+    expect(source).toContain('x-internal-acceptance-token');
+    expect(source).toContain("isValidAcceptanceToken");
+    expect(source).toContain("isInternalAcceptance");
+    expect(source).toContain("__acceptance__");
+  });
+
+  it("593 proxy catch-all route checks x-internal-acceptance-token header", async () => {
+    const source = await import("fs").then(f =>
+      f.readFileSync("apps/web/app/api/deployments/[deploymentId]/proxy/[...path]/route.ts", "utf-8")
+    );
+    expect(source).toContain('x-internal-acceptance-token');
+    expect(source).toContain("isValidAcceptanceToken");
+    expect(source).toContain("isInternalAcceptance");
+    expect(source).toContain("__acceptance__");
+  });
+
+  it("594 acceptance-checks sends token header for proxy URLs", async () => {
+    const source = await import("fs").then(f => f.readFileSync("apps/web/lib/acceptance-checks.ts", "utf-8"));
+    expect(source).toContain("x-internal-acceptance-token");
+    expect(source).toContain("getAcceptanceToken");
+    expect(source).toContain("isProxyUrl");
+  });
+
+  it("595 isValidAcceptanceToken rejects missing token", async () => {
+    const { isValidAcceptanceToken } = await import("../apps/web/lib/acceptance-token");
+    expect(isValidAcceptanceToken("")).toBe(false);
+  });
+
+  it("596 isValidAcceptanceToken rejects wrong token", async () => {
+    const { isValidAcceptanceToken } = await import("../apps/web/lib/acceptance-token");
+    expect(isValidAcceptanceToken("wrong-token-value-here")).toBe(false);
+  });
+
+  it("597 isValidAcceptanceToken accepts correct token", async () => {
+    const { isValidAcceptanceToken } = await import("../apps/web/lib/acceptance-token");
+    const correctToken = process.env.INTERNAL_ACCEPTANCE_TOKEN!;
+    expect(correctToken).toBeTruthy();
+    expect(isValidAcceptanceToken(correctToken)).toBe(true);
+  });
+});

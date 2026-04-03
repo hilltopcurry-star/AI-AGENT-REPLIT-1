@@ -1,23 +1,20 @@
 import * as crypto from "crypto";
 
-let cachedToken: string | null = null;
-
 export function getAcceptanceToken(): string {
-  if (cachedToken) return cachedToken;
-
-  if (process.env.INTERNAL_ACCEPTANCE_TOKEN) {
-    cachedToken = process.env.INTERNAL_ACCEPTANCE_TOKEN;
-    return cachedToken;
+  const token = process.env.INTERNAL_ACCEPTANCE_TOKEN;
+  if (!token) {
+    throw new Error(
+      "INTERNAL_ACCEPTANCE_TOKEN env var is not set. " +
+      "Set the same value in both WEB and WORKER services."
+    );
   }
-
-  cachedToken = crypto.randomBytes(32).toString("hex");
-  process.env.INTERNAL_ACCEPTANCE_TOKEN = cachedToken;
-  return cachedToken;
+  return token;
 }
 
 export function isValidAcceptanceToken(token: string): boolean {
-  const expected = getAcceptanceToken();
+  const expected = process.env.INTERNAL_ACCEPTANCE_TOKEN;
   if (!expected || !token) return false;
+  if (expected.length !== token.length) return false;
   try {
     return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected));
   } catch {
