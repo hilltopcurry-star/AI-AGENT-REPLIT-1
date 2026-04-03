@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getDeploymentPort, relaunchDeployment } from "@/lib/deployer";
 import { rateLimit, getEnvLimit } from "@/lib/rate-limit";
+import { isValidAcceptanceToken } from "@/lib/acceptance-token";
 
 const STRIP_REQUEST_HEADERS = new Set([
   "host",
@@ -30,22 +31,32 @@ async function proxyRequest(
   req: NextRequest,
   { params }: { params: Promise<{ deploymentId: string; path: string[] }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const internalToken = req.headers.get("x-internal-acceptance-token");
+  const isInternalAcceptance = internalToken ? isValidAcceptanceToken(internalToken) : false;
 
-  const rl = await rateLimit({
-    userId: session.user.id,
-    key: "proxy_get",
-    windowSec: 60,
-    limit: getEnvLimit("PROXY_REQ_LIMIT_PER_MIN", 120),
-  });
-  if (!rl.ok) {
-    return NextResponse.json(
-      { error: "Rate limit exceeded", key: "proxy_get", resetAt: rl.resetAt.toISOString(), limit: rl.limit },
-      { status: 429 }
-    );
+  let userId: string | null = null;
+
+  if (isInternalAcceptance) {
+    userId = "__acceptance__";
+  } else {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    userId = session.user.id;
+
+    const rl = await rateLimit({
+      userId,
+      key: "proxy_get",
+      windowSec: 60,
+      limit: getEnvLimit("PROXY_REQ_LIMIT_PER_MIN", 120),
+    });
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: "Rate limit exceeded", key: "proxy_get", resetAt: rl.resetAt.toISOString(), limit: rl.limit },
+        { status: 429 }
+      );
+    }
   }
 
   const { deploymentId, path: pathSegments } = await params;
@@ -54,7 +65,11 @@ async function proxyRequest(
     where: { id: deploymentId },
   });
 
-  if (!deployment || deployment.userId !== session.user.id) {
+  if (!deployment) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  if (!isInternalAcceptance && deployment.userId !== userId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 

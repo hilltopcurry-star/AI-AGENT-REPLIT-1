@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 import * as https from "https";
 import * as http from "http";
+import { getAcceptanceToken } from "./acceptance-token";
 
 export interface CheckResult {
   name: string;
@@ -20,16 +21,38 @@ async function logJob(jobId: string, level: string, message: string) {
   } catch {}
 }
 
-function httpGet(url: string, timeoutMs = 15000): Promise<{ status: number; body: string }> {
+function isProxyUrl(url: string): boolean {
+  return url.includes("/api/deployments/") && url.includes("/proxy");
+}
+
+function getAcceptanceHeaders(): Record<string, string> {
+  return { "x-internal-acceptance-token": getAcceptanceToken() };
+}
+
+function httpGet(url: string, timeoutMs = 15000, extraHeaders?: Record<string, string>): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
-    const mod = url.startsWith("https") ? https : http;
-    const req = mod.get(url, { timeout: timeoutMs }, (res) => {
+    const parsed = new URL(url);
+    const mod = parsed.protocol === "https:" ? https : http;
+    const headers: Record<string, string> = { ...extraHeaders };
+    if (isProxyUrl(url)) {
+      Object.assign(headers, getAcceptanceHeaders());
+    }
+    const opts = {
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: "GET" as const,
+      headers,
+      timeout: timeoutMs,
+    };
+    const req = mod.request(opts, (res) => {
       let body = "";
       res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
       res.on("end", () => resolve({ status: res.statusCode || 0, body }));
     });
     req.on("error", (e) => reject(e));
     req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+    req.end();
   });
 }
 
@@ -42,6 +65,10 @@ async function httpPost(
     const parsed = new URL(url);
     const mod = parsed.protocol === "https:" ? https : http;
     const payload = JSON.stringify(data);
+    const extraHeaders: Record<string, string> = {};
+    if (isProxyUrl(url)) {
+      Object.assign(extraHeaders, getAcceptanceHeaders());
+    }
     const opts = {
       hostname: parsed.hostname,
       port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
@@ -50,6 +77,7 @@ async function httpPost(
       headers: {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(payload),
+        ...extraHeaders,
       },
       timeout: timeoutMs,
     };
