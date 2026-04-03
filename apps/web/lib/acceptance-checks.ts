@@ -166,7 +166,7 @@ async function checkCrud(baseUrl: string): Promise<CheckResult> {
       return {
         name: "crud",
         passed: false,
-        detail: `POST /api/projects/${projectId}/tasks failed: status=${taskRes.status}`,
+        detail: `POST /api/projects/${projectId}/tasks failed: status=${taskRes.status} body=${taskRes.body.slice(0, 200)}`,
       };
     }
 

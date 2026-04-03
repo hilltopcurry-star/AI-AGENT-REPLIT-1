@@ -637,3 +637,47 @@ describe("Fly Dockerfile + Prisma + proxy safety fixes", () => {
     expect(source).toContain("URL NOT promoted to Production");
   });
 });
+
+describe("Template route handler params safety", () => {
+  it("577 tasks route uses resolveProjectId (safe params await)", async () => {
+    const { projectManagementSaasTemplate } = await import("../apps/web/lib/templates/project-management-saas");
+    const files = projectManagementSaasTemplate.getFiles();
+    const tasksRoute = files.find((f: any) => f.path === "app/api/projects/[projectId]/tasks/route.ts");
+    expect(tasksRoute).toBeTruthy();
+    expect(tasksRoute!.content).toContain("resolveProjectId");
+    expect(tasksRoute!.content).toContain("await resolveProjectId(ctx)");
+    expect(tasksRoute!.content).not.toContain("params.projectId");
+  });
+
+  it("578 comments route uses resolveTaskId (safe params await)", async () => {
+    const { projectManagementSaasTemplate } = await import("../apps/web/lib/templates/project-management-saas");
+    const files = projectManagementSaasTemplate.getFiles();
+    const commentsRoute = files.find((f: any) => f.path === "app/api/tasks/[taskId]/comments/route.ts");
+    expect(commentsRoute).toBeTruthy();
+    expect(commentsRoute!.content).toContain("resolveTaskId");
+    expect(commentsRoute!.content).toContain("await resolveTaskId(ctx)");
+    expect(commentsRoute!.content).not.toContain("params.taskId");
+  });
+
+  it("579 tasks POST validates project exists before creating task", async () => {
+    const { projectManagementSaasTemplate } = await import("../apps/web/lib/templates/project-management-saas");
+    const files = projectManagementSaasTemplate.getFiles();
+    const tasksRoute = files.find((f: any) => f.path === "app/api/projects/[projectId]/tasks/route.ts");
+    expect(tasksRoute!.content).toContain("project.findUnique");
+    expect(tasksRoute!.content).toContain("Project not found");
+    expect(tasksRoute!.content).toContain("404");
+  });
+
+  it("580 tasks POST returns 201 with task JSON", async () => {
+    const { projectManagementSaasTemplate } = await import("../apps/web/lib/templates/project-management-saas");
+    const files = projectManagementSaasTemplate.getFiles();
+    const tasksRoute = files.find((f: any) => f.path === "app/api/projects/[projectId]/tasks/route.ts");
+    expect(tasksRoute!.content).toContain("status: 201");
+    expect(tasksRoute!.content).toContain("task.create");
+  });
+
+  it("581 acceptance CRUD logs response body on task failure", async () => {
+    const source = await import("fs").then(f => f.readFileSync("apps/web/lib/acceptance-checks.ts", "utf-8"));
+    expect(source).toContain("taskRes.body.slice");
+  });
+});

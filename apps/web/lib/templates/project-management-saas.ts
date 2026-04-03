@@ -464,10 +464,17 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-export async function GET(_req: NextRequest, { params }: { params: { projectId: string } }) {
+async function resolveProjectId(ctx: any): Promise<string> {
+  const p = ctx.params;
+  const resolved = typeof p?.then === "function" ? await p : p;
+  return resolved.projectId;
+}
+
+export async function GET(_req: NextRequest, ctx: any) {
   try {
+    const projectId = await resolveProjectId(ctx);
     const tasks = await prisma.task.findMany({
-      where: { projectId: params.projectId },
+      where: { projectId },
       include: { comments: true },
       orderBy: { createdAt: "desc" },
     });
@@ -477,12 +484,18 @@ export async function GET(_req: NextRequest, { params }: { params: { projectId: 
   }
 }
 
-export async function POST(req: NextRequest, { params }: { params: { projectId: string } }) {
+export async function POST(req: NextRequest, ctx: any) {
   try {
+    const projectId = await resolveProjectId(ctx);
     const body = await req.json();
     const { title, description, priority, status } = body;
     if (!title || typeof title !== "string") {
       return NextResponse.json({ error: "title is required" }, { status: 400 });
+    }
+
+    const project = await prisma.project.findUnique({ where: { id: projectId } });
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
     const task = await prisma.task.create({
@@ -491,11 +504,12 @@ export async function POST(req: NextRequest, { params }: { params: { projectId: 
         description: description || null,
         priority: priority || "medium",
         status: status || "todo",
-        projectId: params.projectId,
+        projectId,
       },
     });
     return NextResponse.json(task, { status: 201 });
   } catch (e: any) {
+    console.error("[TASKS POST]", e);
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
@@ -508,10 +522,17 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-export async function GET(_req: NextRequest, { params }: { params: { taskId: string } }) {
+async function resolveTaskId(ctx: any): Promise<string> {
+  const p = ctx.params;
+  const resolved = typeof p?.then === "function" ? await p : p;
+  return resolved.taskId;
+}
+
+export async function GET(_req: NextRequest, ctx: any) {
   try {
+    const taskId = await resolveTaskId(ctx);
     const comments = await prisma.comment.findMany({
-      where: { taskId: params.taskId },
+      where: { taskId },
       include: { user: { select: { id: true, name: true, email: true } } },
       orderBy: { createdAt: "asc" },
     });
@@ -521,8 +542,9 @@ export async function GET(_req: NextRequest, { params }: { params: { taskId: str
   }
 }
 
-export async function POST(req: NextRequest, { params }: { params: { taskId: string } }) {
+export async function POST(req: NextRequest, ctx: any) {
   try {
+    const taskId = await resolveTaskId(ctx);
     const body = await req.json();
     const { content } = body;
     if (!content || typeof content !== "string") {
@@ -537,10 +559,11 @@ export async function POST(req: NextRequest, { params }: { params: { taskId: str
     }
 
     const comment = await prisma.comment.create({
-      data: { content, taskId: params.taskId, userId: user.id },
+      data: { content, taskId, userId: user.id },
     });
     return NextResponse.json(comment, { status: 201 });
   } catch (e: any) {
+    console.error("[COMMENTS POST]", e);
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
