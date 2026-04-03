@@ -1,6 +1,6 @@
 # AI Workspace — Phase-Scale-2
 
-## Status: PHASE-SCALE-2 (2026-03-23) — Real Fly.io Deployment + flyctl auto-install + Working App Guarantee
+## Status: PHASE-SCALE-2 (2026-04-03) — Real Fly.io Deployment + flyctl auto-install + Working App Guarantee (E2E VERIFIED)
 
 ## Overview
 AI-powered development workspace built with Next.js App Router. Deterministic mock agent (Phase-1) with optional LLM agent behind `AI_AGENT_MODE` feature flag. Real sandboxed build runner behind `BUILD_RUNNER_MODE` feature flag. Reverse-proxy deployer launches built apps and serves them via proxy routes. 3 workspace tabs (Chat, Console, Database). Google OAuth authentication. All build logs are DB-backed and streamed via SSE. OpenAI cost controls with kill switch, daily caps, and usage tracking. Workspace cleanup with TTL and per-user limits. Build queue system with worker process for scalable builds. Fly.io deployment stub (Phase-Scale-2 for real API). Admin dashboard for monitoring.
@@ -19,7 +19,7 @@ AI-powered development workspace built with Next.js App Router. Deterministic mo
 - **Auth**: NextAuth.js (Auth.js v5 beta) with Google OAuth + Prisma adapter + trustHost
 - **AI**: Agent router (`lib/agent/index.ts`) → mock-agent.ts (default) or llm-agent.ts (when AI_AGENT_MODE=llm)
 - **Build**: Real sandboxed runner (`lib/job-runner.ts`) or mock logs, controlled by `BUILD_RUNNER_MODE`
-- **Deploy**: `deployWorkspace()` attempts Fly.io first when `FLY_API_TOKEN` is set; on Fly success returns Fly URL as primary. Falls back to reverse-proxy deployer (spawns `next start`, proxies via `/api/deployments/{id}/proxy`). Done events include `deploymentProvider` ("fly" or "replit-proxy") and `deploymentId`. `FlyDeployment.queueJobId` is now optional (supports both queue worker and direct job-runner paths).
+- **Deploy**: `deployWorkspace()` attempts Fly.io first when `FLY_API_TOKEN` is set; on Fly success returns Fly URL as primary. Falls back to reverse-proxy deployer (spawns `next start`, proxies via `/api/deployments/{id}/proxy`). Done events include `deploymentProvider` ("fly" or "replit-proxy") and `deploymentId`. `FlyDeployment.queueJobId` is now optional (supports both queue worker and direct job-runner paths). flyctl deploy uses `--depot=false --no-cache` flags to avoid Fly registry push errors. 3 retries with 15s delay on registry errors, then destroy+recreate app as final fallback.
 - **Cost Controls**: Kill switch, daily request/token caps, per-request token limit, usage tracking
 - **Cleanup**: TTL-based workspace cleanup, per-user workspace/deployment limits
 - **UI**: Radix UI + Tailwind CSS + shadcn/ui components

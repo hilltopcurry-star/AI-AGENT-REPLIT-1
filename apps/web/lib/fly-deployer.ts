@@ -169,6 +169,35 @@ async function ensureFlyApp(
   return false;
 }
 
+async function destroyFlyApp(appName: string, token: string, jobId: string | null): Promise<boolean> {
+  await logToJob(jobId, "INFO", `[DEPLOY] Destroying Fly app '${appName}' to clear corrupted registry...`);
+  try {
+    const result = spawnSync(
+      "flyctl",
+      ["apps", "destroy", appName, "--yes"],
+      {
+        timeout: 60000,
+        encoding: "utf-8",
+        env: { ...process.env, FLYCTL_API_TOKEN: token, FLY_API_TOKEN: token },
+      }
+    );
+    if (result.status === 0) {
+      await logToJob(jobId, "INFO", `[DEPLOY] Fly app '${appName}' destroyed successfully`);
+      return true;
+    }
+    const apiResult = await flyApiRequest("DELETE", `/apps/${appName}`, token);
+    if (apiResult.status === 200 || apiResult.status === 202) {
+      await logToJob(jobId, "INFO", `[DEPLOY] Fly app '${appName}' destroyed via API`);
+      return true;
+    }
+    await logToJob(jobId, "WARN", `[DEPLOY] Could not destroy Fly app '${appName}': ${(result.stderr || "").slice(0, 200)}`);
+    return false;
+  } catch (err) {
+    await logToJob(jobId, "WARN", `[DEPLOY] Error destroying app: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
 async function deployWithFlyctl(
   appName: string,
   workspacePath: string,
@@ -178,7 +207,8 @@ async function deployWithFlyctl(
   await logToJob(jobId, "INFO", `[DEPLOY] Deploying '${appName}' via flyctl from ${workspacePath}...`);
 
   try {
-    const flyToml = `app = "${appName}"
+    const writeFlyToml = () => {
+      const flyToml = `app = "${appName}"
 primary_region = "${region}"
 
 [build]
@@ -195,18 +225,24 @@ primary_region = "${region}"
   cpu_kind = "shared"
   cpus = 1
 `;
-    fs.writeFileSync(path.join(workspacePath, "fly.toml"), flyToml, "utf-8");
+      fs.writeFileSync(path.join(workspacePath, "fly.toml"), flyToml, "utf-8");
+    };
+
+    writeFlyToml();
 
     const maxAttempts = 3;
+    let registryFailCount = 0;
+
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       await logToJob(jobId, "INFO", `[DEPLOY] flyctl deploy attempt ${attempt}/${maxAttempts}...`);
 
+      const depotFlag = attempt > 1 ? "--depot=false" : "--depot=false";
       const result = spawnSync(
         "flyctl",
-        ["deploy", "--now", "--remote-only"],
+        ["deploy", "--now", "--remote-only", depotFlag, "--no-cache"],
         {
           cwd: workspacePath,
-          timeout: 300000,
+          timeout: 600000,
           encoding: "utf-8",
           env: { ...process.env, FLYCTL_API_TOKEN: process.env.FLY_API_TOKEN },
         }
@@ -224,13 +260,51 @@ primary_region = "${region}"
       }
 
       const isRegistryError = output.includes("failed to push registry") || output.includes("unexpected status from HEAD request");
-      if (isRegistryError && attempt < maxAttempts) {
-        await logToJob(jobId, "INFO", `[DEPLOY] Registry push error (transient), retrying in 15s...`);
-        await new Promise(r => setTimeout(r, 15000));
-        continue;
+      if (isRegistryError) {
+        registryFailCount++;
+        if (attempt < maxAttempts) {
+          await logToJob(jobId, "INFO", `[DEPLOY] Registry push error (transient), retrying in 15s...`);
+          await new Promise(r => setTimeout(r, 15000));
+          continue;
+        }
+      } else {
+        return { success: false, error: `flyctl deploy failed (exit ${result.status}): ${lines.slice(-3).join(" ")}` };
       }
+    }
 
-      return { success: false, error: `flyctl deploy failed (exit ${result.status}): ${lines.slice(-3).join(" ")}` };
+    if (registryFailCount >= maxAttempts) {
+      await logToJob(jobId, "WARN", `[DEPLOY] All ${maxAttempts} attempts failed with registry errors. Destroying app and recreating...`);
+      const token = process.env.FLY_API_TOKEN || "";
+      const destroyed = await destroyFlyApp(appName, token, jobId);
+      if (destroyed) {
+        await new Promise(r => setTimeout(r, 10000));
+        const org = getFlyOrg();
+        const recreated = await ensureFlyApp(appName, token, org, jobId);
+        if (recreated) {
+          writeFlyToml();
+          await logToJob(jobId, "INFO", `[DEPLOY] Final deploy attempt after app recreation...`);
+          const result = spawnSync(
+            "flyctl",
+            ["deploy", "--now", "--remote-only", "--depot=false", "--no-cache"],
+            {
+              cwd: workspacePath,
+              timeout: 600000,
+              encoding: "utf-8",
+              env: { ...process.env, FLYCTL_API_TOKEN: process.env.FLY_API_TOKEN },
+            }
+          );
+          const output = (result.stdout || "") + "\n" + (result.stderr || "");
+          const lines = output.split("\n").filter((l: string) => l.trim());
+          for (const line of lines.slice(-20)) {
+            await logToJob(jobId, "INFO", `[DEPLOY] [flyctl] ${line.substring(0, 300)}`);
+          }
+          if (result.status === 0) {
+            await logToJob(jobId, "SUCCESS", `[DEPLOY] flyctl deploy succeeded after app recreation!`);
+            return { success: true };
+          }
+          return { success: false, error: `flyctl deploy failed after app recreation (exit ${result.status}): ${lines.slice(-3).join(" ")}` };
+        }
+      }
     }
 
     return { success: false, error: "flyctl deploy failed after all retry attempts" };
