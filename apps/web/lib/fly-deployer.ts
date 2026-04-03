@@ -26,10 +26,10 @@ function getFlyRegion(): string {
 const FLYCTL_VERSION = "0.3.54";
 
 function ensureFlyctl(): boolean {
-  console.log(`[DEPLOY] ensureFlyctl: v5-pinned (${FLYCTL_VERSION})`);
+  console.log(`[DEPLOY] ensureFlyctl: v6-writable-path (${FLYCTL_VERSION})`);
   const home = process.env.HOME || "/root";
   const flyBin = path.join(home, ".fly", "bin");
-  process.env.PATH = `/usr/local/bin:/usr/bin:${flyBin}:${process.env.PATH}`;
+  process.env.PATH = `${flyBin}:/usr/local/bin:/usr/bin:${process.env.PATH}`;
 
   try {
     const r = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
@@ -39,70 +39,55 @@ function ensureFlyctl(): boolean {
     }
   } catch {}
 
-  console.log("[DEPLOY] ensureFlyctl: not found, installing...");
+  console.log(`[DEPLOY] ensureFlyctl: not found, installing to ${flyBin}...`);
+  try { fs.mkdirSync(flyBin, { recursive: true }); } catch {}
+
+  const tarUrl = `https://github.com/superfly/flyctl/releases/download/v${FLYCTL_VERSION}/flyctl_${FLYCTL_VERSION}_Linux_x86_64.tar.gz`;
+  console.log(`[DEPLOY] ensureFlyctl: downloading ${tarUrl}`);
+
   try {
-    execSync("apt-get update -qq 2>&1 && apt-get install -y -qq curl ca-certificates 2>&1", { timeout: 120000, encoding: "utf-8" });
-  } catch (e: unknown) {
-    console.error(`[DEPLOY] ensureFlyctl: apt failed: ${(e as Error).message || e}`);
-  }
+    execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 });
+    execSync(`curl -fsSL --retry 3 --retry-delay 2 -o /tmp/flyctl.tar.gz "${tarUrl}"`, { timeout: 90000, encoding: "utf-8" });
 
-  const downloadUrls = [
-    `https://github.com/superfly/flyctl/releases/download/v${FLYCTL_VERSION}/flyctl_${FLYCTL_VERSION}_Linux_x86_64.tar.gz`,
-    `https://github.com/superfly/flyctl/releases/download/v${FLYCTL_VERSION}/fly${FLYCTL_VERSION}_Linux_x86_64.tar.gz`,
-    "https://fly.io/install.sh",
-  ];
-
-  for (const dlUrl of downloadUrls) {
-    console.log(`[DEPLOY] ensureFlyctl: trying ${dlUrl}`);
-
-    if (dlUrl.endsWith("install.sh")) {
-      try {
-        execSync(`curl -fsSL "${dlUrl}" | sh`, {
-          timeout: 120000,
-          encoding: "utf-8",
-          env: { ...process.env, FLYCTL_INSTALL: "/usr/local" },
-        });
-      } catch {}
-      for (const p of ["/usr/local/bin/flyctl", path.join(flyBin, "flyctl")]) {
-        if (fs.existsSync(p)) {
-          const r = spawnSync(p, ["version"], { timeout: 5000, encoding: "utf-8" });
-          if (r.status === 0) {
-            if (p.includes(".fly")) process.env.PATH = `${path.dirname(p)}:${process.env.PATH}`;
-            console.log(`[DEPLOY] ensureFlyctl: install.sh OK — ${(r.stdout || "").trim().split("\n")[0]}`);
-            return true;
-          }
-        }
-      }
-      console.log("[DEPLOY] ensureFlyctl: install.sh did not produce working flyctl");
-      continue;
-    }
-
-    try {
-      execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 });
-      execSync(`curl -fsSL --retry 3 --retry-delay 2 -o /tmp/flyctl.tar.gz "${dlUrl}"`, { timeout: 60000, encoding: "utf-8" });
-
-      const stat = fs.statSync("/tmp/flyctl.tar.gz");
-      if (stat.size < 1000) {
-        console.error(`[DEPLOY] ensureFlyctl: download too small (${stat.size} bytes), skipping`);
-        continue;
-      }
+    const stat = fs.statSync("/tmp/flyctl.tar.gz");
+    if (stat.size < 1000) {
+      console.error(`[DEPLOY] ensureFlyctl: download too small (${stat.size} bytes)`);
+    } else {
       console.log(`[DEPLOY] ensureFlyctl: downloaded ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
-
       execSync("tar -xzf /tmp/flyctl.tar.gz -C /tmp", { timeout: 30000, encoding: "utf-8" });
 
       if (fs.existsSync("/tmp/flyctl")) {
-        execSync("mv /tmp/flyctl /usr/local/bin/flyctl && chmod +x /usr/local/bin/flyctl", { timeout: 5000 });
-        const r = spawnSync("/usr/local/bin/flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+        const dest = path.join(flyBin, "flyctl");
+        fs.copyFileSync("/tmp/flyctl", dest);
+        fs.chmodSync(dest, 0o755);
+        const r = spawnSync(dest, ["version"], { timeout: 5000, encoding: "utf-8" });
         if (r.status === 0) {
           console.log(`[DEPLOY] ensureFlyctl: OK — ${(r.stdout || "").trim().split("\n")[0]}`);
           return true;
         }
-        console.error("[DEPLOY] ensureFlyctl: version check failed");
+        console.error("[DEPLOY] ensureFlyctl: version check failed after copy");
       } else {
-        console.error("[DEPLOY] ensureFlyctl: flyctl binary not found after extract");
+        console.error("[DEPLOY] ensureFlyctl: flyctl binary not in tar");
       }
-    } catch (e: unknown) {
-      console.error(`[DEPLOY] ensureFlyctl: failed for ${dlUrl}: ${(e as Error).message || e}`);
+    }
+  } catch (e: unknown) {
+    console.error(`[DEPLOY] ensureFlyctl: tar download failed: ${(e as Error).message || e}`);
+  }
+
+  console.log("[DEPLOY] ensureFlyctl: trying install.sh fallback...");
+  try {
+    execSync(`curl -fsSL "https://fly.io/install.sh" | sh`, {
+      timeout: 120000,
+      encoding: "utf-8",
+      env: { ...process.env, FLYCTL_INSTALL: path.join(home, ".fly") },
+    });
+  } catch {}
+  const homeFlyctl = path.join(flyBin, "flyctl");
+  if (fs.existsSync(homeFlyctl)) {
+    const r = spawnSync(homeFlyctl, ["version"], { timeout: 5000, encoding: "utf-8" });
+    if (r.status === 0) {
+      console.log(`[DEPLOY] ensureFlyctl: install.sh OK — ${(r.stdout || "").trim().split("\n")[0]}`);
+      return true;
     }
   }
 
@@ -212,29 +197,43 @@ primary_region = "${region}"
 `;
     fs.writeFileSync(path.join(workspacePath, "fly.toml"), flyToml, "utf-8");
 
-    const result = spawnSync(
-      "flyctl",
-      ["deploy", "--now", "--remote-only"],
-      {
-        cwd: workspacePath,
-        timeout: 300000,
-        encoding: "utf-8",
-        env: { ...process.env, FLYCTL_API_TOKEN: process.env.FLY_API_TOKEN },
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      await logToJob(jobId, "INFO", `[DEPLOY] flyctl deploy attempt ${attempt}/${maxAttempts}...`);
+
+      const result = spawnSync(
+        "flyctl",
+        ["deploy", "--now", "--remote-only"],
+        {
+          cwd: workspacePath,
+          timeout: 300000,
+          encoding: "utf-8",
+          env: { ...process.env, FLYCTL_API_TOKEN: process.env.FLY_API_TOKEN },
+        }
+      );
+
+      const output = (result.stdout || "") + "\n" + (result.stderr || "");
+      const lines = output.split("\n").filter((l: string) => l.trim());
+      for (const line of lines.slice(-20)) {
+        await logToJob(jobId, "INFO", `[DEPLOY] [flyctl] ${line.substring(0, 300)}`);
       }
-    );
 
-    const output = (result.stdout || "") + "\n" + (result.stderr || "");
-    const lines = output.split("\n").filter((l: string) => l.trim());
-    for (const line of lines.slice(-20)) {
-      await logToJob(jobId, "INFO", `[DEPLOY] [flyctl] ${line.substring(0, 300)}`);
+      if (result.status === 0) {
+        await logToJob(jobId, "SUCCESS", `[DEPLOY] flyctl deploy succeeded for '${appName}' on attempt ${attempt}`);
+        return { success: true };
+      }
+
+      const isRegistryError = output.includes("failed to push registry") || output.includes("unexpected status from HEAD request");
+      if (isRegistryError && attempt < maxAttempts) {
+        await logToJob(jobId, "INFO", `[DEPLOY] Registry push error (transient), retrying in 15s...`);
+        await new Promise(r => setTimeout(r, 15000));
+        continue;
+      }
+
+      return { success: false, error: `flyctl deploy failed (exit ${result.status}): ${lines.slice(-3).join(" ")}` };
     }
 
-    if (result.status === 0) {
-      await logToJob(jobId, "SUCCESS", `[DEPLOY] flyctl deploy succeeded for '${appName}'`);
-      return { success: true };
-    }
-
-    return { success: false, error: `flyctl deploy failed (exit ${result.status}): ${lines.slice(-3).join(" ")}` };
+    return { success: false, error: "flyctl deploy failed after all retry attempts" };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `flyctl error: ${msg}` };

@@ -686,7 +686,7 @@ describe("ensureFlyctl pinned version", () => {
   it("582 worker ensureFlyctl uses pinned version, no /latest/download URL", async () => {
     const source = await import("fs").then(f => f.readFileSync("apps/web/worker/index.ts", "utf-8"));
     expect(source).toContain("FLYCTL_VERSION");
-    expect(source).toContain("v5-pinned");
+    expect(source).toContain("v6-writable-path");
     expect(source).not.toContain("releases/latest/download");
     const match = source.match(/FLYCTL_VERSION\s*=\s*"([^"]+)"/);
     expect(match).toBeTruthy();
@@ -696,23 +696,27 @@ describe("ensureFlyctl pinned version", () => {
   it("583 fly-deployer ensureFlyctl uses pinned version, no /latest/download URL", async () => {
     const source = await import("fs").then(f => f.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8"));
     expect(source).toContain("FLYCTL_VERSION");
-    expect(source).toContain("v5-pinned");
+    expect(source).toContain("v6-writable-path");
     expect(source).not.toContain("releases/latest/download");
     const match = source.match(/FLYCTL_VERSION\s*=\s*"([^"]+)"/);
     expect(match).toBeTruthy();
     expect(match![1]).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
-  it("584 worker download URL uses tagged version format", async () => {
+  it("584 worker installs to writable ~/.fly/bin path", async () => {
     const source = await import("fs").then(f => f.readFileSync("apps/web/worker/index.ts", "utf-8"));
     expect(source).toContain("releases/download/v${FLYCTL_VERSION}");
     expect(source).toContain("flyctl_${FLYCTL_VERSION}_Linux_x86_64.tar.gz");
+    expect(source).toContain("copyFileSync");
+    expect(source).not.toContain("mv /tmp/flyctl /usr/local/bin");
   });
 
-  it("585 fly-deployer download URL uses tagged version format", async () => {
+  it("585 fly-deployer installs to writable ~/.fly/bin path", async () => {
     const source = await import("fs").then(f => f.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8"));
     expect(source).toContain("releases/download/v${FLYCTL_VERSION}");
     expect(source).toContain("flyctl_${FLYCTL_VERSION}_Linux_x86_64.tar.gz");
+    expect(source).toContain("copyFileSync");
+    expect(source).not.toContain("mv /tmp/flyctl /usr/local/bin");
   });
 
   it("586 both files use same FLYCTL_VERSION value", async () => {
@@ -728,5 +732,29 @@ describe("ensureFlyctl pinned version", () => {
     const deploySrc = await import("fs").then(f => f.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8"));
     expect(workerSrc).toContain("https://fly.io/install.sh");
     expect(deploySrc).toContain("https://fly.io/install.sh");
+  });
+});
+
+describe("Fly deploy retry on registry errors", () => {
+  it("590 fly-deployer retries up to 3 times on registry push errors", async () => {
+    const source = await import("fs").then(f => f.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8"));
+    expect(source).toContain("maxAttempts = 3");
+    expect(source).toContain("failed to push registry");
+    expect(source).toContain("unexpected status from HEAD request");
+    expect(source).toContain("retrying in 15s");
+  });
+});
+
+describe("specJson string parsing", () => {
+  it("588 worker parses string specJson before using templateKey", async () => {
+    const source = await import("fs").then(f => f.readFileSync("apps/web/worker/index.ts", "utf-8"));
+    expect(source).toContain('typeof project.specJson === "string"');
+    expect(source).toContain("JSON.parse(project.specJson)");
+  });
+
+  it("589 job-runner parses string specJson before using templateKey", async () => {
+    const source = await import("fs").then(f => f.readFileSync("apps/web/lib/job-runner.ts", "utf-8"));
+    expect(source).toContain('typeof project.specJson === "string"');
+    expect(source).toContain("JSON.parse(project.specJson)");
   });
 });

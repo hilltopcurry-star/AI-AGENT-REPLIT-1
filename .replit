@@ -115,7 +115,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "export PATH=/home/runner/.fly/bin:$PATH && cd apps/web && WORKER_ID=worker-replit-1 npx tsx worker/index.ts"
+args = "export PATH=/home/runner/.fly/bin:$PATH && cd apps/web && WORKER_ID=worker-replit-1 npx --yes tsx worker/index.ts"
 
 [agent]
 integrations = ["javascript_openai_ai_integrations:2.0.0", "javascript_log_in_with_replit:2.0.0"]

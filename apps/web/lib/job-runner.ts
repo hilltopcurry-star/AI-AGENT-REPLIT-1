@@ -296,7 +296,14 @@ export async function runJob(jobId: string, projectId: string, userId?: string):
 
   try {
     const project = await prisma.project.findUnique({ where: { id: projectId } });
-    const spec = project?.specJson as Record<string, unknown> | null;
+    let spec: Record<string, unknown> | null = null;
+    if (project?.specJson) {
+      if (typeof project.specJson === "string") {
+        try { spec = JSON.parse(project.specJson); } catch { spec = null; }
+      } else {
+        spec = project.specJson as Record<string, unknown>;
+      }
+    }
 
     const specLines = getSpecLogLines(spec);
     await log(jobId, "INFO", specLines.templateKey);
