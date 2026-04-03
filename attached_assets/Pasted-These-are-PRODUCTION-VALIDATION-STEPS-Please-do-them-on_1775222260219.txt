@@ -1,0 +1,39 @@
+These are PRODUCTION VALIDATION STEPS. Please do them on your side and report back with logs/screenshots.
+
+After pushing commit ca1faa5 to main, we must confirm Railway WEB + WORKER are actually running this commit and that Fly deployments + acceptance behave correctly.
+
+1) Confirm Railway is running ca1faa5 (WEB + WORKER)
+- Open Railway dashboard → WEB service → Deployments → latest deploy commit must be ca1faa5
+- Open Railway dashboard → WORKER service → Deployments → latest deploy commit must be ca1faa5
+- Also hit: https://<RAILWAY_WEB_DOMAIN>/api/debug/api-routes
+  and paste the output showing RAILWAY_GIT_COMMIT_SHA (must match ca1faa5)
+
+2) End-to-end Fly deploy validation (project-management-saas)
+- Trigger a new job that selects templateKey=project-management-saas
+- Confirm Fly deploy succeeds (no Prisma/OpenSSL error)
+- Confirm container startup runs: prisma migrate deploy (and succeeds)
+- Confirm acceptance runs and PASSES:
+  - GET /api/health -> ok
+  - GET /api/db-check -> ok
+  - GET /projects -> 200 and contains the template marker meta tag
+  - CRUD API checks pass
+- Paste the job log section from [DEPLOY] Starting Fly.io deployment through [ACCEPTANCE] result.
+- Paste the final Fly URL and the response of:
+  curl -sS <FlyURL>/api/db-check
+  curl -sS <FlyURL>/projects | head
+
+IMPORTANT: Ensure the Fly app has DATABASE_URL set (otherwise migrate/db-check will fail). If our platform provisions DB per generated app, confirm how DATABASE_URL is being set.
+
+3) Proxy fallback validation (safety rule)
+- Force Fly deploy to fail (e.g. temporarily remove/invalid Fly token) and re-run a job.
+- Confirm the system does NOT show “Live URL (Production)” unless acceptance passes.
+- Confirm acceptance runs against the proxy URL too.
+- Paste logs showing either:
+  - acceptance pass -> production URL promoted
+  OR
+  - acceptance fail -> job FAILED and “URL NOT promoted to Production”
+
+Please reply with:
+- Confirmation WEB commit + WORKER commit (from Railway)
+- One successful Fly job log excerpt + Fly URL checks
+- One forced proxy fallback log excerpt showing no production URL unless acceptance passes

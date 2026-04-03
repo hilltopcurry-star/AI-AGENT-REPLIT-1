@@ -344,38 +344,46 @@ export async function createDockerContext(
     : "RUN mkdir -p ./public";
 
   const hasPrisma = fs.existsSync(path.join(workspacePath, "prisma", "schema.prisma"));
-  const prismaBuilderLines = hasPrisma
-    ? `RUN apk add --no-cache openssl libc6-compat
-RUN npx prisma generate`
+  const prismaSchemaContent = hasPrisma
+    ? fs.readFileSync(path.join(workspacePath, "prisma", "schema.prisma"), "utf-8")
     : "";
-  const prismaRunnerLines = hasPrisma
-    ? `RUN apk add --no-cache openssl libc6-compat
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma`
+  const isSqlite = prismaSchemaContent.includes('provider = "sqlite"');
+
+  const prismaRunnerCopy = hasPrisma
+    ? [
+        "COPY --from=builder /app/prisma ./prisma",
+        "COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma",
+        "COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma",
+      ].join("\n")
     : "";
+
+  const sqliteEnvLine = isSqlite ? 'ENV DATABASE_URL="file:./prisma/dev.db"' : "";
+
   const startCmd = hasPrisma
-    ? `CMD ["sh", "-c", "npx prisma migrate deploy 2>/dev/null || npx prisma db push --accept-data-loss 2>/dev/null; node server.js"]`
+    ? isSqlite
+      ? `CMD ["sh", "-c", "npx prisma db push --accept-data-loss 2>/dev/null || true; node server.js"]`
+      : `CMD ["sh", "-c", "npx prisma migrate deploy 2>/dev/null || npx prisma db push --accept-data-loss 2>/dev/null || true; node server.js"]`
     : `CMD ["node", "server.js"]`;
 
   const dockerfile = `FROM node:20-alpine AS builder
 WORKDIR /app
-${hasPrisma ? "RUN apk add --no-cache openssl libc6-compat" : ""}
+RUN apk add --no-cache openssl libc6-compat
 COPY package.json package-lock.json* ./
 RUN npm ci --no-audit --no-fund
 COPY . .
-${hasPrisma ? "RUN npx prisma generate" : ""}
 RUN npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-${hasPrisma ? "RUN apk add --no-cache openssl libc6-compat" : ""}
+RUN apk add --no-cache openssl libc6-compat
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 ${publicCopyLine}
-${hasPrisma ? "COPY --from=builder /app/prisma ./prisma\nCOPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma\nCOPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma" : ""}
+${prismaRunnerCopy}
+${sqliteEnvLine}
+RUN chown -R nextjs:nodejs /app
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000

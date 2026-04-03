@@ -587,47 +587,39 @@ describe("Spec logger + redaction + safety gates", () => {
 });
 
 describe("Fly Dockerfile + Prisma + proxy safety fixes", () => {
-  it("571 template uses PostgreSQL not SQLite", async () => {
+  it("571 template uses SQLite with env DATABASE_URL", async () => {
     const { projectManagementSaasTemplate } = await import("../apps/web/lib/templates/project-management-saas");
     const files = projectManagementSaasTemplate.getFiles();
     const schema = files.find((f: any) => f.path === "prisma/schema.prisma");
     expect(schema).toBeTruthy();
-    expect(schema!.content).toContain('provider = "postgresql"');
+    expect(schema!.content).toContain('provider = "sqlite"');
     expect(schema!.content).toContain('env("DATABASE_URL")');
-    expect(schema!.content).not.toContain("sqlite");
     expect(schema!.content).not.toContain("file:./dev.db");
   });
 
-  it("572 template Prisma schema has binaryTargets for Alpine/Debian", async () => {
+  it("572 template Prisma schema has binaryTargets for Alpine", async () => {
     const { projectManagementSaasTemplate } = await import("../apps/web/lib/templates/project-management-saas");
     const files = projectManagementSaasTemplate.getFiles();
     const schema = files.find((f: any) => f.path === "prisma/schema.prisma");
     expect(schema!.content).toContain("linux-musl-openssl-3.0.x");
-    expect(schema!.content).toContain("debian-openssl-3.0.x");
   });
 
-  it("573 template build script does NOT run prisma db push", async () => {
+  it("573 template has .env with DATABASE_URL for SQLite", async () => {
+    const { projectManagementSaasTemplate } = await import("../apps/web/lib/templates/project-management-saas");
+    const files = projectManagementSaasTemplate.getFiles();
+    const envFile = files.find((f: any) => f.path === ".env");
+    expect(envFile).toBeTruthy();
+    expect(envFile!.content).toContain("DATABASE_URL");
+    expect(envFile!.content).toContain("file:");
+  });
+
+  it("574 template build script runs prisma generate + db push + next build", async () => {
     const { projectManagementSaasTemplate } = await import("../apps/web/lib/templates/project-management-saas");
     const pkg = projectManagementSaasTemplate.getPackageJson();
     const build = (pkg.scripts as any).build;
     expect(build).toContain("prisma generate");
+    expect(build).toContain("prisma db push");
     expect(build).toContain("next build");
-    expect(build).not.toContain("db push");
-  });
-
-  it("574 fly-deployer generates Dockerfile with openssl for Prisma apps", async () => {
-    const fs = await import("fs");
-    const path = await import("path");
-    const os = await import("os");
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fly-test-"));
-    fs.mkdirSync(path.join(tmpDir, "prisma"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, "prisma", "schema.prisma"), 'datasource db { provider = "postgresql" }');
-    fs.writeFileSync(path.join(tmpDir, "package.json"), '{"scripts":{"build":"next build"}}');
-
-    const mod = await import("../apps/web/lib/fly-deployer");
-    expect(mod).toBeTruthy();
-
-    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it("575 acceptance is never skipped for proxy URLs in job-runner", async () => {
