@@ -91,6 +91,32 @@ function spawnNextStart(workspacePath: string, port: number, logFn?: (msg: strin
   const systemPath = getSystemPath();
   const _log = (msg: string) => { if (logFn) logFn(msg); console.log(msg); };
 
+  const workspaceEnv: Record<string, string> = {};
+  const envFilePath = path.join(workspacePath, ".env");
+  if (fs.existsSync(envFilePath)) {
+    try {
+      const envContent = fs.readFileSync(envFilePath, "utf-8");
+      for (const line of envContent.split("\n")) {
+        const match = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*"?([^"]*)"?\s*$/);
+        if (match) workspaceEnv[match[1]] = match[2];
+      }
+    } catch {}
+  }
+
+  if (workspaceEnv.DATABASE_URL && workspaceEnv.DATABASE_URL.startsWith("file:./")) {
+    const relPath = workspaceEnv.DATABASE_URL.replace("file:./", "");
+    const schemaDir = path.join(workspacePath, "prisma");
+    const absFromSchema = path.join(schemaDir, relPath);
+    const absFromRoot = path.join(workspacePath, relPath);
+    if (fs.existsSync(absFromSchema)) {
+      workspaceEnv.DATABASE_URL = `file:${absFromSchema}`;
+      _log(`[DEPLOY] Resolved DATABASE_URL to ${workspaceEnv.DATABASE_URL}`);
+    } else if (fs.existsSync(absFromRoot)) {
+      workspaceEnv.DATABASE_URL = `file:${absFromRoot}`;
+      _log(`[DEPLOY] Resolved DATABASE_URL to ${workspaceEnv.DATABASE_URL}`);
+    }
+  }
+
   const safeEnv: NodeJS.ProcessEnv = {
     PATH: systemPath || "/usr/local/bin:/usr/bin:/bin",
     HOME: workspacePath,
@@ -99,6 +125,7 @@ function spawnNextStart(workspacePath: string, port: number, logFn?: (msg: strin
     HOSTNAME: "0.0.0.0",
     XDG_CONFIG_HOME: path.join(workspacePath, ".config"),
     TMPDIR: workspacePath,
+    ...workspaceEnv,
   };
 
   const standaloneDir = path.join(workspacePath, ".next", "standalone");
@@ -115,7 +142,7 @@ function spawnNextStart(workspacePath: string, port: number, logFn?: (msg: strin
   if (standaloneServer) {
     _log(`[DEPLOY] Starting standalone server: ${standaloneServer}`);
     return spawn(process.execPath, [standaloneServer], {
-      cwd: path.dirname(standaloneServer),
+      cwd: workspacePath,
       env: safeEnv,
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,

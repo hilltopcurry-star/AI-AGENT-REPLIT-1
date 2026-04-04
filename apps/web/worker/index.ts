@@ -333,26 +333,57 @@ async function processQueueJob(queueJob: {
 
     const flyTokenPresent = !!(process.env.FLY_API_TOKEN);
     await log(jobId, "INFO", `[DEPLOY] flyTokenPresent=${flyTokenPresent}`);
-    await log(jobId, "INFO", "[DEPLOY] attempting fly deploy...");
-    const { deployToFly } = await import("../lib/fly-deployer");
-    const flyResult = await deployToFly({
-      queueJobId,
-      userId,
-      projectId,
-      jobId,
-      workspacePath: workspaceDir,
-    });
 
     let deployUrl = "";
     let deploySuccess = false;
-    if (flyResult.status === "SUCCESS" && flyResult.url) {
-      await log(jobId, "SUCCESS", `[DEPLOY] Fly URL: ${flyResult.url}`);
-      await log(jobId, "INFO", `[DEPLOY] Provider: fly`);
-      deployUrl = flyResult.url;
-      deploySuccess = true;
-    } else {
-      const msg = flyResult.error || flyResult.status || "unknown";
-      await log(jobId, "ERROR", `[DEPLOY] Deployment failed: ${msg}`);
+
+    if (flyTokenPresent) {
+      await log(jobId, "INFO", "[DEPLOY] attempting fly deploy...");
+      try {
+        const { deployToFly } = await import("../lib/fly-deployer");
+        const flyResult = await deployToFly({
+          queueJobId,
+          userId,
+          projectId,
+          jobId,
+          workspacePath: workspaceDir,
+        });
+
+        if (flyResult.status === "SUCCESS" && flyResult.url) {
+          await log(jobId, "SUCCESS", `[DEPLOY] Fly URL: ${flyResult.url}`);
+          await log(jobId, "INFO", `[DEPLOY] Provider: fly`);
+          deployUrl = flyResult.url;
+          deploySuccess = true;
+        } else {
+          const msg = flyResult.error || flyResult.status || "unknown";
+          await log(jobId, "WARN", `[DEPLOY] Fly deploy failed: ${msg}`);
+          await log(jobId, "INFO", "[DEPLOY] Falling back to proxy deploy...");
+        }
+      } catch (flyErr) {
+        const msg = flyErr instanceof Error ? flyErr.message : String(flyErr);
+        await log(jobId, "WARN", `[DEPLOY] Fly deploy error: ${msg}`);
+        await log(jobId, "INFO", "[DEPLOY] Falling back to proxy deploy...");
+      }
+    }
+
+    if (!deploySuccess) {
+      await log(jobId, "INFO", "[DEPLOY] Using proxy deploy...");
+      try {
+        const { deployWorkspace } = await import("../lib/deployer");
+        const proxyResult = await deployWorkspace({
+          jobId,
+          projectId,
+          userId,
+          workspacePath: workspaceDir,
+        });
+        deployUrl = proxyResult.url;
+        deploySuccess = true;
+        await log(jobId, "SUCCESS", `[DEPLOY] Proxy URL: ${deployUrl}`);
+        await log(jobId, "INFO", `[DEPLOY] Provider: replit-proxy`);
+      } catch (proxyErr) {
+        const msg = proxyErr instanceof Error ? proxyErr.message : String(proxyErr);
+        await log(jobId, "ERROR", `[DEPLOY] Proxy deploy failed: ${msg}`);
+      }
     }
 
     const tplKey = (spec?.templateKey as string) || null;

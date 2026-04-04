@@ -812,4 +812,13 @@ describe("Proxy acceptance token auth", () => {
     expect(correctToken).toBeTruthy();
     expect(isValidAcceptanceToken(correctToken)).toBe(true);
   });
+
+  it("598 worker falls back to proxy deploy when Fly unavailable", async () => {
+    const source = await import("fs").then(f => f.readFileSync("apps/web/worker/index.ts", "utf-8"));
+    expect(source).toContain("if (flyTokenPresent)");
+    expect(source).toContain("Falling back to proxy deploy");
+    expect(source).toContain("deployWorkspace");
+    expect(source).toContain("if (!deploySuccess)");
+    expect(source).toContain("Provider: replit-proxy");
+  });
 });

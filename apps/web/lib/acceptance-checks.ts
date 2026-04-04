@@ -25,6 +25,16 @@ function isProxyUrl(url: string): boolean {
   return url.includes("/api/deployments/") && url.includes("/proxy");
 }
 
+function toLocalProxyUrl(url: string): string {
+  if (!isProxyUrl(url)) return url;
+  try {
+    const parsed = new URL(url);
+    return `http://localhost:${process.env.PORT || 5000}${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
+
 function getAcceptanceHeaders(): Record<string, string> {
   return { "x-internal-acceptance-token": getAcceptanceToken() };
 }
@@ -209,33 +219,34 @@ export async function runAcceptanceChecks(
   jobId: string,
   templateKey: string | null
 ): Promise<CheckResult[]> {
+  const effectiveUrl = toLocalProxyUrl(baseUrl);
   await logJob(jobId, "INFO", `[ACCEPTANCE] templateKey=${templateKey || "none"}`);
-  await logJob(jobId, "INFO", `[ACCEPTANCE] Running checks against ${baseUrl}`);
+  await logJob(jobId, "INFO", `[ACCEPTANCE] Running checks against ${effectiveUrl}${effectiveUrl !== baseUrl ? " (localized from " + baseUrl + ")" : ""}`);
 
   const checks: CheckResult[] = [];
 
-  const healthResult = await checkHealth(baseUrl);
+  const healthResult = await checkHealth(effectiveUrl);
   checks.push(healthResult);
   await logJob(jobId, healthResult.passed ? "SUCCESS" : "ERROR",
     `[ACCEPTANCE] health ${healthResult.passed ? "OK" : "FAIL"}: ${healthResult.detail}`);
 
-  const pageResult = await checkHomepage(baseUrl);
+  const pageResult = await checkHomepage(effectiveUrl);
   checks.push(pageResult);
   await logJob(jobId, pageResult.passed ? "SUCCESS" : "ERROR",
     `[ACCEPTANCE] homepage ${pageResult.passed ? "OK" : "FAIL"}: ${pageResult.detail}`);
 
   if (templateKey) {
-    const projectsResult = await checkProjectsPage(baseUrl, templateKey);
+    const projectsResult = await checkProjectsPage(effectiveUrl, templateKey);
     checks.push(projectsResult);
     await logJob(jobId, projectsResult.passed ? "SUCCESS" : "ERROR",
       `[ACCEPTANCE] projectsPage ${projectsResult.passed ? "OK" : "FAIL"}: ${projectsResult.detail}`);
 
-    const dbResult = await checkDbConnection(baseUrl);
+    const dbResult = await checkDbConnection(effectiveUrl);
     checks.push(dbResult);
     await logJob(jobId, dbResult.passed ? "SUCCESS" : "ERROR",
       `[ACCEPTANCE] db-check ${dbResult.passed ? "OK" : "FAIL"}: ${dbResult.detail}`);
 
-    const crudResult = await checkCrud(baseUrl);
+    const crudResult = await checkCrud(effectiveUrl);
     checks.push(crudResult);
     await logJob(jobId, crudResult.passed ? "SUCCESS" : "ERROR",
       `[ACCEPTANCE] crud ${crudResult.passed ? "OK" : "FAIL"}: ${crudResult.detail}`);
