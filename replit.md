@@ -1,6 +1,6 @@
 # AI Workspace — Phase-Scale-2
 
-## Status: PHASE-SCALE-2 (2026-04-04) — Real Fly.io Deployment + flyctl auto-install + Working App Guarantee (E2E VERIFIED) + Proxy Acceptance Verified
+## Status: PHASE-SCALE-2 (2026-04-05) — Real Fly.io Deployment + flyctl build-time install + Working App Guarantee (E2E VERIFIED) + Proxy Acceptance Verified
 
 ## Overview
 AI-powered development workspace built with Next.js App Router. Deterministic mock agent (Phase-1) with optional LLM agent behind `AI_AGENT_MODE` feature flag. Real sandboxed build runner behind `BUILD_RUNNER_MODE` feature flag. Reverse-proxy deployer launches built apps and serves them via proxy routes. 3 workspace tabs (Chat, Console, Database). Google OAuth authentication. All build logs are DB-backed and streamed via SSE. OpenAI cost controls with kill switch, daily caps, and usage tracking. Workspace cleanup with TTL and per-user limits. Build queue system with worker process for scalable builds. Fly.io deployment stub (Phase-Scale-2 for real API). Admin dashboard for monitoring.

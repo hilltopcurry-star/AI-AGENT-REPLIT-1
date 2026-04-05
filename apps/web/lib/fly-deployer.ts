@@ -23,18 +23,34 @@ function getFlyRegion(): string {
   return process.env.FLY_REGION || "iad";
 }
 
-const FLYCTL_VERSION = "0.3.54";
+const FLYCTL_VERSION = "0.4.29";
 
 function ensureFlyctl(): boolean {
-  console.log(`[DEPLOY] ensureFlyctl: v6-writable-path (${FLYCTL_VERSION})`);
+  console.log(`[DEPLOY] ensureFlyctl: v7-build-time-preferred (${FLYCTL_VERSION})`);
   const home = process.env.HOME || "/root";
   const flyBin = path.join(home, ".fly", "bin");
-  process.env.PATH = `${flyBin}:/usr/local/bin:/usr/bin:${process.env.PATH}`;
+  process.env.PATH = `/usr/local/bin:${flyBin}:/usr/bin:${process.env.PATH}`;
+
+  const checkPaths = [
+    "/usr/local/bin/flyctl",
+    path.join(flyBin, "flyctl"),
+  ];
+  for (const p of checkPaths) {
+    if (fs.existsSync(p)) {
+      try {
+        const r = spawnSync(p, ["version"], { timeout: 5000, encoding: "utf-8" });
+        if (r.status === 0) {
+          console.log(`[DEPLOY] ensureFlyctl: found at ${p} — ${(r.stdout || "").trim().split("\n")[0]}`);
+          return true;
+        }
+      } catch {}
+    }
+  }
 
   try {
     const r = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
     if (r.status === 0) {
-      console.log(`[DEPLOY] ensureFlyctl: already installed — ${(r.stdout || "").trim().split("\n")[0]}`);
+      console.log(`[DEPLOY] ensureFlyctl: already on PATH — ${(r.stdout || "").trim().split("\n")[0]}`);
       return true;
     }
   } catch {}
@@ -47,7 +63,7 @@ function ensureFlyctl(): boolean {
 
   try {
     execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 });
-    execSync(`curl -fsSL --retry 3 --retry-delay 2 -o /tmp/flyctl.tar.gz "${tarUrl}"`, { timeout: 90000, encoding: "utf-8" });
+    execSync(`curl -fsSL --retry 3 --retry-delay 5 --connect-timeout 15 -o /tmp/flyctl.tar.gz "${tarUrl}"`, { timeout: 120000, encoding: "utf-8" });
 
     const stat = fs.statSync("/tmp/flyctl.tar.gz");
     if (stat.size < 1000) {

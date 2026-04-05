@@ -686,7 +686,7 @@ describe("ensureFlyctl pinned version", () => {
   it("582 worker ensureFlyctl uses pinned version, no /latest/download URL", async () => {
     const source = await import("fs").then(f => f.readFileSync("apps/web/worker/index.ts", "utf-8"));
     expect(source).toContain("FLYCTL_VERSION");
-    expect(source).toContain("v6-writable-path");
+    expect(source).toContain("v7-build-time-preferred");
     expect(source).not.toContain("releases/latest/download");
     const match = source.match(/FLYCTL_VERSION\s*=\s*"([^"]+)"/);
     expect(match).toBeTruthy();
@@ -696,7 +696,7 @@ describe("ensureFlyctl pinned version", () => {
   it("583 fly-deployer ensureFlyctl uses pinned version, no /latest/download URL", async () => {
     const source = await import("fs").then(f => f.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8"));
     expect(source).toContain("FLYCTL_VERSION");
-    expect(source).toContain("v6-writable-path");
+    expect(source).toContain("v7-build-time-preferred");
     expect(source).not.toContain("releases/latest/download");
     const match = source.match(/FLYCTL_VERSION\s*=\s*"([^"]+)"/);
     expect(match).toBeTruthy();
@@ -717,6 +717,14 @@ describe("ensureFlyctl pinned version", () => {
     expect(source).toContain("flyctl_${FLYCTL_VERSION}_Linux_x86_64.tar.gz");
     expect(source).toContain("copyFileSync");
     expect(source).not.toContain("mv /tmp/flyctl /usr/local/bin");
+  });
+
+  it("586a Dockerfile.worker installs flyctl at build time", async () => {
+    const source = await import("fs").then(f => f.readFileSync("apps/web/Dockerfile.worker", "utf-8"));
+    expect(source).toContain("flyctl");
+    expect(source).toContain("/usr/local/bin");
+    expect(source).toContain("flyctl version");
+    expect(source).toContain("node:20");
   });
 
   it("586 both files use same FLYCTL_VERSION value", async () => {
