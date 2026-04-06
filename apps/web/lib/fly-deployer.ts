@@ -32,12 +32,25 @@ async function ensureFlyctl(jobId: string | null): Promise<boolean> {
     await logToJob(jobId, level, msg);
   };
 
-  await jlog("INFO", `[DEPLOY] ensureFlyctl: v8-joblog (${FLYCTL_VERSION})`);
+  await jlog("INFO", `[DEPLOY] ensureFlyctl: v9-curl-preflight (${FLYCTL_VERSION})`);
 
   const home = process.env.HOME || "/root";
   const flyBin = path.join(home, ".fly", "bin");
-  process.env.PATH = `/usr/local/bin:/root/.fly/bin:${flyBin}:/usr/bin:${process.env.PATH}`;
+  process.env.PATH = `/usr/local/bin:/root/.fly/bin:${flyBin}:/usr/bin:/bin:${process.env.PATH}`;
   await jlog("INFO", `[DEPLOY] ensureFlyctl: PATH=${process.env.PATH}`);
+
+  const hasCurl = spawnSync("which", ["curl"], { timeout: 3000, encoding: "utf-8" });
+  if (hasCurl.status !== 0) {
+    await jlog("WARN", "[DEPLOY] ensureFlyctl: curl not found, installing via apt-get...");
+    try {
+      execSync("apt-get update -qq && apt-get install -y -qq curl ca-certificates tar gzip >/dev/null 2>&1", { timeout: 60000 });
+      await jlog("INFO", "[DEPLOY] ensureFlyctl: curl installed successfully");
+    } catch (e) {
+      await jlog("ERROR", `[DEPLOY] ensureFlyctl: apt-get install curl failed: ${e instanceof Error ? e.message : e}`);
+    }
+  } else {
+    await jlog("INFO", `[DEPLOY] ensureFlyctl: curl available at ${(hasCurl.stdout || "").trim()}`);
+  }
 
   const checkPaths = [
     "/usr/local/bin/flyctl",
