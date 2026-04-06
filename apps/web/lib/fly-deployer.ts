@@ -26,11 +26,18 @@ function getFlyRegion(): string {
 
 const FLYCTL_VERSION = "0.4.29";
 
-function ensureFlyctl(): boolean {
-  console.log(`[DEPLOY] ensureFlyctl: v7-build-time-preferred (${FLYCTL_VERSION})`);
+async function ensureFlyctl(jobId: string | null): Promise<boolean> {
+  const jlog = async (level: string, msg: string) => {
+    console.log(msg);
+    await logToJob(jobId, level, msg);
+  };
+
+  await jlog("INFO", `[DEPLOY] ensureFlyctl: v8-joblog (${FLYCTL_VERSION})`);
+
   const home = process.env.HOME || "/root";
   const flyBin = path.join(home, ".fly", "bin");
-  process.env.PATH = `/usr/local/bin:${flyBin}:/usr/bin:${process.env.PATH}`;
+  process.env.PATH = `/usr/local/bin:/root/.fly/bin:${flyBin}:/usr/bin:${process.env.PATH}`;
+  await jlog("INFO", `[DEPLOY] ensureFlyctl: PATH=${process.env.PATH}`);
 
   const checkPaths = [
     "/usr/local/bin/flyctl",
@@ -43,19 +50,19 @@ function ensureFlyctl(): boolean {
     if (seen.has(p)) continue;
     seen.add(p);
     const exists = fs.existsSync(p);
-    console.log(`[DEPLOY] ensureFlyctl: checking ${p} — exists=${exists}`);
+    await jlog("INFO", `[DEPLOY] ensureFlyctl: checking ${p} — exists=${exists}`);
     if (exists) {
       try {
         const r = spawnSync(p, ["version"], { timeout: 10000, encoding: "utf-8" });
         const stdout = (r.stdout || "").trim();
         const stderr = (r.stderr || "").trim();
-        console.log(`[DEPLOY] ensureFlyctl: ${p} version exit=${r.status} stdout="${stdout.split("\n")[0]}" stderr="${stderr.substring(0, 200)}"`);
+        await jlog("INFO", `[DEPLOY] ensureFlyctl: ${p} version exit=${r.status} stdout="${stdout.split("\n")[0]}" stderr="${stderr.substring(0, 200)}"`);
         if (r.status === 0) {
-          console.log(`[DEPLOY] ensureFlyctl: FOUND at ${p}`);
+          await jlog("SUCCESS", `[DEPLOY] ensureFlyctl: FOUND at ${p}`);
           return true;
         }
       } catch (e) {
-        console.error(`[DEPLOY] ensureFlyctl: ${p} spawn error: ${e instanceof Error ? e.message : e}`);
+        await jlog("ERROR", `[DEPLOY] ensureFlyctl: ${p} spawn error: ${e instanceof Error ? e.message : e}`);
       }
     }
   }
@@ -64,21 +71,21 @@ function ensureFlyctl(): boolean {
     const r = spawnSync("flyctl", ["version"], { timeout: 10000, encoding: "utf-8" });
     const stdout = (r.stdout || "").trim();
     const stderr = (r.stderr || "").trim();
-    console.log(`[DEPLOY] ensureFlyctl: PATH lookup exit=${r.status} stdout="${stdout.split("\n")[0]}" stderr="${stderr.substring(0, 200)}"`);
+    await jlog("INFO", `[DEPLOY] ensureFlyctl: PATH lookup exit=${r.status} stdout="${stdout.split("\n")[0]}" stderr="${stderr.substring(0, 200)}"`);
     if (r.status === 0) {
       const which = spawnSync("which", ["flyctl"], { timeout: 5000, encoding: "utf-8" });
-      console.log(`[DEPLOY] ensureFlyctl: on PATH at ${(which.stdout || "").trim()}`);
+      await jlog("SUCCESS", `[DEPLOY] ensureFlyctl: on PATH at ${(which.stdout || "").trim()}`);
       return true;
     }
   } catch (e) {
-    console.log(`[DEPLOY] ensureFlyctl: PATH lookup failed: ${e instanceof Error ? e.message : e}`);
+    await jlog("WARN", `[DEPLOY] ensureFlyctl: PATH lookup failed: ${e instanceof Error ? e.message : e}`);
   }
 
-  console.log(`[DEPLOY] ensureFlyctl: not found, installing to ${flyBin}...`);
+  await jlog("INFO", `[DEPLOY] ensureFlyctl: not found, installing to ${flyBin}...`);
   try { fs.mkdirSync(flyBin, { recursive: true }); } catch {}
 
   const tarUrl = `https://github.com/superfly/flyctl/releases/download/v${FLYCTL_VERSION}/flyctl_${FLYCTL_VERSION}_Linux_x86_64.tar.gz`;
-  console.log(`[DEPLOY] ensureFlyctl: downloading ${tarUrl}`);
+  await jlog("INFO", `[DEPLOY] ensureFlyctl: downloading ${tarUrl}`);
 
   try {
     execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 });
@@ -86,9 +93,9 @@ function ensureFlyctl(): boolean {
 
     const stat = fs.statSync("/tmp/flyctl.tar.gz");
     if (stat.size < 1000) {
-      console.error(`[DEPLOY] ensureFlyctl: download too small (${stat.size} bytes)`);
+      await jlog("ERROR", `[DEPLOY] ensureFlyctl: download too small (${stat.size} bytes)`);
     } else {
-      console.log(`[DEPLOY] ensureFlyctl: downloaded ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
+      await jlog("INFO", `[DEPLOY] ensureFlyctl: downloaded ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
       execSync("tar -xzf /tmp/flyctl.tar.gz -C /tmp", { timeout: 30000, encoding: "utf-8" });
 
       if (fs.existsSync("/tmp/flyctl")) {
@@ -97,19 +104,19 @@ function ensureFlyctl(): boolean {
         fs.chmodSync(dest, 0o755);
         const r = spawnSync(dest, ["version"], { timeout: 10000, encoding: "utf-8" });
         if (r.status === 0) {
-          console.log(`[DEPLOY] ensureFlyctl: installed OK — ${(r.stdout || "").trim().split("\n")[0]}`);
+          await jlog("SUCCESS", `[DEPLOY] ensureFlyctl: installed OK — ${(r.stdout || "").trim().split("\n")[0]}`);
           return true;
         }
-        console.error(`[DEPLOY] ensureFlyctl: version check failed after copy, exit=${r.status} stderr=${(r.stderr || "").substring(0, 200)}`);
+        await jlog("ERROR", `[DEPLOY] ensureFlyctl: version check failed after copy, exit=${r.status} stderr=${(r.stderr || "").substring(0, 200)}`);
       } else {
-        console.error("[DEPLOY] ensureFlyctl: flyctl binary not in tar");
+        await jlog("ERROR", "[DEPLOY] ensureFlyctl: flyctl binary not in tar");
       }
     }
   } catch (e: unknown) {
-    console.error(`[DEPLOY] ensureFlyctl: tar download failed: ${(e as Error).message || e}`);
+    await jlog("ERROR", `[DEPLOY] ensureFlyctl: tar download failed: ${(e as Error).message || e}`);
   }
 
-  console.log("[DEPLOY] ensureFlyctl: trying install.sh fallback...");
+  await jlog("INFO", "[DEPLOY] ensureFlyctl: trying install.sh fallback...");
   try {
     execSync(`curl -fsSL "https://fly.io/install.sh" | sh`, {
       timeout: 120000,
@@ -121,13 +128,13 @@ function ensureFlyctl(): boolean {
   if (fs.existsSync(homeFlyctl)) {
     const r = spawnSync(homeFlyctl, ["version"], { timeout: 10000, encoding: "utf-8" });
     if (r.status === 0) {
-      console.log(`[DEPLOY] ensureFlyctl: install.sh OK — ${(r.stdout || "").trim().split("\n")[0]}`);
+      await jlog("SUCCESS", `[DEPLOY] ensureFlyctl: install.sh OK — ${(r.stdout || "").trim().split("\n")[0]}`);
       return true;
     }
   }
 
-  execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 });
-  console.error("[DEPLOY] ensureFlyctl: ALL ATTEMPTS FAILED — flyctl is NOT available");
+  try { execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 }); } catch {}
+  await jlog("ERROR", "[DEPLOY] ensureFlyctl: ALL ATTEMPTS FAILED — flyctl is NOT available");
   return false;
 }
 
@@ -481,8 +488,7 @@ export async function deployToFly(opts: {
 }): Promise<{ flyDeploymentId: string; status: string; url?: string; error?: string }> {
   const { queueJobId, userId, projectId, jobId, workspacePath } = opts;
 
-  await logToJob(jobId, "INFO", "[DEPLOY] ensureFlyctl: checking...");
-  const flyReady = ensureFlyctl();
+  const flyReady = await ensureFlyctl(jobId);
   await logToJob(jobId, "INFO", `[DEPLOY] ensureFlyctl: available=${flyReady}`);
 
   if (!flyReady) {
