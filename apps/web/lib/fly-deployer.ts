@@ -10,9 +10,10 @@ async function logToJob(jobId: string | null, level: string, message: string) {
   await prisma.jobLog.create({ data: { jobId, level, message } });
 }
 
-function getAppName(projectId: string): string {
-  const short = projectId.replace(/[^a-z0-9]/gi, "").slice(0, 20).toLowerCase();
-  return `aiapp-${short}`;
+function generateAppName(projectId: string): string {
+  const short = projectId.replace(/[^a-z0-9]/gi, "").slice(0, 16).toLowerCase();
+  const suffix = Date.now().toString(36).slice(-4);
+  return `aiapp-${short}-${suffix}`;
 }
 
 function getFlyOrg(): string {
@@ -35,25 +36,39 @@ function ensureFlyctl(): boolean {
     "/usr/local/bin/flyctl",
     path.join(flyBin, "flyctl"),
   ];
+
   for (const p of checkPaths) {
-    if (fs.existsSync(p)) {
+    const exists = fs.existsSync(p);
+    console.log(`[DEPLOY] ensureFlyctl: checking ${p} — exists=${exists}`);
+    if (exists) {
       try {
-        const r = spawnSync(p, ["version"], { timeout: 5000, encoding: "utf-8" });
+        const r = spawnSync(p, ["version"], { timeout: 10000, encoding: "utf-8" });
+        const stdout = (r.stdout || "").trim();
+        const stderr = (r.stderr || "").trim();
+        console.log(`[DEPLOY] ensureFlyctl: ${p} version exit=${r.status} stdout="${stdout.split("\n")[0]}" stderr="${stderr.substring(0, 200)}"`);
         if (r.status === 0) {
-          console.log(`[DEPLOY] ensureFlyctl: found at ${p} — ${(r.stdout || "").trim().split("\n")[0]}`);
+          console.log(`[DEPLOY] ensureFlyctl: FOUND at ${p}`);
           return true;
         }
-      } catch {}
+      } catch (e) {
+        console.error(`[DEPLOY] ensureFlyctl: ${p} spawn error: ${e instanceof Error ? e.message : e}`);
+      }
     }
   }
 
   try {
-    const r = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+    const r = spawnSync("flyctl", ["version"], { timeout: 10000, encoding: "utf-8" });
+    const stdout = (r.stdout || "").trim();
+    const stderr = (r.stderr || "").trim();
+    console.log(`[DEPLOY] ensureFlyctl: PATH lookup exit=${r.status} stdout="${stdout.split("\n")[0]}" stderr="${stderr.substring(0, 200)}"`);
     if (r.status === 0) {
-      console.log(`[DEPLOY] ensureFlyctl: already on PATH — ${(r.stdout || "").trim().split("\n")[0]}`);
+      const which = spawnSync("which", ["flyctl"], { timeout: 5000, encoding: "utf-8" });
+      console.log(`[DEPLOY] ensureFlyctl: on PATH at ${(which.stdout || "").trim()}`);
       return true;
     }
-  } catch {}
+  } catch (e) {
+    console.log(`[DEPLOY] ensureFlyctl: PATH lookup failed: ${e instanceof Error ? e.message : e}`);
+  }
 
   console.log(`[DEPLOY] ensureFlyctl: not found, installing to ${flyBin}...`);
   try { fs.mkdirSync(flyBin, { recursive: true }); } catch {}
@@ -76,12 +91,12 @@ function ensureFlyctl(): boolean {
         const dest = path.join(flyBin, "flyctl");
         fs.copyFileSync("/tmp/flyctl", dest);
         fs.chmodSync(dest, 0o755);
-        const r = spawnSync(dest, ["version"], { timeout: 5000, encoding: "utf-8" });
+        const r = spawnSync(dest, ["version"], { timeout: 10000, encoding: "utf-8" });
         if (r.status === 0) {
-          console.log(`[DEPLOY] ensureFlyctl: OK — ${(r.stdout || "").trim().split("\n")[0]}`);
+          console.log(`[DEPLOY] ensureFlyctl: installed OK — ${(r.stdout || "").trim().split("\n")[0]}`);
           return true;
         }
-        console.error("[DEPLOY] ensureFlyctl: version check failed after copy");
+        console.error(`[DEPLOY] ensureFlyctl: version check failed after copy, exit=${r.status} stderr=${(r.stderr || "").substring(0, 200)}`);
       } else {
         console.error("[DEPLOY] ensureFlyctl: flyctl binary not in tar");
       }
@@ -100,7 +115,7 @@ function ensureFlyctl(): boolean {
   } catch {}
   const homeFlyctl = path.join(flyBin, "flyctl");
   if (fs.existsSync(homeFlyctl)) {
-    const r = spawnSync(homeFlyctl, ["version"], { timeout: 5000, encoding: "utf-8" });
+    const r = spawnSync(homeFlyctl, ["version"], { timeout: 10000, encoding: "utf-8" });
     if (r.status === 0) {
       console.log(`[DEPLOY] ensureFlyctl: install.sh OK — ${(r.stdout || "").trim().split("\n")[0]}`);
       return true;
@@ -108,17 +123,29 @@ function ensureFlyctl(): boolean {
   }
 
   execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 });
-  console.error("[DEPLOY] ensureFlyctl: all attempts failed");
+  console.error("[DEPLOY] ensureFlyctl: ALL ATTEMPTS FAILED — flyctl is NOT available");
   return false;
 }
 
-function hasFlyctl(): boolean {
-  try {
-    const result = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
-    return result.status === 0;
-  } catch {
-    return false;
+function findFlyctlPath(): string {
+  const home = process.env.HOME || "/root";
+  const candidates = [
+    "/usr/local/bin/flyctl",
+    path.join(home, ".fly", "bin", "flyctl"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      try {
+        const r = spawnSync(p, ["version"], { timeout: 5000, encoding: "utf-8" });
+        if (r.status === 0) return p;
+      } catch {}
+    }
   }
+  try {
+    const r = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
+    if (r.status === 0) return "flyctl";
+  } catch {}
+  return "";
 }
 
 async function flyApiRequest(
@@ -186,32 +213,34 @@ async function ensureFlyApp(
 }
 
 async function destroyFlyApp(appName: string, token: string, jobId: string | null): Promise<boolean> {
-  await logToJob(jobId, "INFO", `[DEPLOY] Destroying Fly app '${appName}' to clear corrupted registry...`);
-  try {
-    const result = spawnSync(
-      "flyctl",
-      ["apps", "destroy", appName, "--yes"],
-      {
-        timeout: 60000,
-        encoding: "utf-8",
-        env: { ...process.env, FLYCTL_API_TOKEN: token, FLY_API_TOKEN: token },
+  await logToJob(jobId, "INFO", `[DEPLOY] Destroying Fly app '${appName}'...`);
+  const flyctl = findFlyctlPath();
+  if (flyctl) {
+    try {
+      const result = spawnSync(
+        flyctl,
+        ["apps", "destroy", appName, "--yes"],
+        {
+          timeout: 60000,
+          encoding: "utf-8",
+          env: { ...process.env, FLYCTL_API_TOKEN: token, FLY_API_TOKEN: token },
+        }
+      );
+      if (result.status === 0) {
+        await logToJob(jobId, "INFO", `[DEPLOY] Fly app '${appName}' destroyed via flyctl`);
+        return true;
       }
-    );
-    if (result.status === 0) {
-      await logToJob(jobId, "INFO", `[DEPLOY] Fly app '${appName}' destroyed successfully`);
-      return true;
-    }
-    const apiResult = await flyApiRequest("DELETE", `/apps/${appName}`, token);
-    if (apiResult.status === 200 || apiResult.status === 202) {
-      await logToJob(jobId, "INFO", `[DEPLOY] Fly app '${appName}' destroyed via API`);
-      return true;
-    }
-    await logToJob(jobId, "WARN", `[DEPLOY] Could not destroy Fly app '${appName}': ${(result.stderr || "").slice(0, 200)}`);
-    return false;
-  } catch (err) {
-    await logToJob(jobId, "WARN", `[DEPLOY] Error destroying app: ${err instanceof Error ? err.message : String(err)}`);
-    return false;
+    } catch {}
   }
+
+  const apiResult = await flyApiRequest("DELETE", `/apps/${appName}`, token);
+  if (apiResult.status === 200 || apiResult.status === 202) {
+    await logToJob(jobId, "INFO", `[DEPLOY] Fly app '${appName}' destroyed via API`);
+    return true;
+  }
+
+  await logToJob(jobId, "WARN", `[DEPLOY] Could not destroy Fly app '${appName}'`);
+  return false;
 }
 
 async function deployWithFlyctl(
@@ -220,7 +249,12 @@ async function deployWithFlyctl(
   region: string,
   jobId: string | null
 ): Promise<{ success: boolean; error?: string }> {
-  await logToJob(jobId, "INFO", `[DEPLOY] Deploying '${appName}' via flyctl from ${workspacePath}...`);
+  const flyctl = findFlyctlPath();
+  if (!flyctl) {
+    return { success: false, error: "flyctl binary not found by findFlyctlPath()" };
+  }
+
+  await logToJob(jobId, "INFO", `[DEPLOY] Deploying '${appName}' via ${flyctl} from ${workspacePath}...`);
 
   try {
     const writeFlyToml = () => {
@@ -252,10 +286,9 @@ primary_region = "${region}"
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       await logToJob(jobId, "INFO", `[DEPLOY] flyctl deploy attempt ${attempt}/${maxAttempts}...`);
 
-      const depotFlag = attempt > 1 ? "--depot=false" : "--depot=false";
       const result = spawnSync(
-        "flyctl",
-        ["deploy", "--now", "--remote-only", depotFlag, "--no-cache"],
+        flyctl,
+        ["deploy", "--now", "--remote-only", "--depot=false", "--no-cache"],
         {
           cwd: workspacePath,
           timeout: 600000,
@@ -300,7 +333,7 @@ primary_region = "${region}"
           writeFlyToml();
           await logToJob(jobId, "INFO", `[DEPLOY] Final deploy attempt after app recreation...`);
           const result = spawnSync(
-            "flyctl",
+            flyctl,
             ["deploy", "--now", "--remote-only", "--depot=false", "--no-cache"],
             {
               cwd: workspacePath,
@@ -328,55 +361,6 @@ primary_region = "${region}"
     const msg = err instanceof Error ? err.message : String(err);
     return { success: false, error: `flyctl error: ${msg}` };
   }
-}
-
-async function deployWithMachinesApi(
-  appName: string,
-  workspacePath: string,
-  token: string,
-  region: string,
-  jobId: string | null
-): Promise<{ success: boolean; error?: string }> {
-  await logToJob(jobId, "INFO", "[DEPLOY] flyctl not available, using Fly Machines API...");
-
-  await logToJob(jobId, "INFO", "[DEPLOY] Building Docker image requires flyctl or Fly remote builder.");
-  await logToJob(
-    jobId,
-    "WARN",
-    "[DEPLOY] Fly Machines API requires a pre-built Docker image. " +
-      "Install flyctl for automatic deployment, or push an image to a registry and use the API. " +
-      "See: https://fly.io/docs/machines/flyctl/fly-machine-run/"
-  );
-
-  const instructions = [
-    "To deploy manually:",
-    `1. Install flyctl: curl -L https://fly.io/install.sh | sh`,
-    `2. cd ${workspacePath}`,
-    `3. flyctl auth login`,
-    `4. flyctl launch --name ${appName} --region ${region} --now`,
-    `Or push to a registry and use: flyctl machine run <image> --app ${appName}`,
-  ];
-
-  for (const line of instructions) {
-    await logToJob(jobId, "INFO", `[DEPLOY] ${line}`);
-  }
-
-  const existingMachines = await flyApiRequest("GET", `/apps/${appName}/machines`, token);
-  if (existingMachines.status === 200 && Array.isArray(existingMachines.data)) {
-    const machines = existingMachines.data as Array<{ id: string; state: string }>;
-    if (machines.length > 0) {
-      await logToJob(
-        jobId,
-        "INFO",
-        `[DEPLOY] App '${appName}' has ${machines.length} existing machine(s): ${machines.map((m) => `${m.id}(${m.state})`).join(", ")}`
-      );
-    }
-  }
-
-  return {
-    success: false,
-    error: `flyctl not available. Install flyctl for automatic Docker deployment. App '${appName}' has been created on Fly.io — deploy manually or install flyctl.`,
-  };
 }
 
 export async function createDockerContext(
@@ -489,13 +473,30 @@ export async function deployToFly(opts: {
 }): Promise<{ flyDeploymentId: string; status: string; url?: string; error?: string }> {
   const { queueJobId, userId, projectId, jobId, workspacePath } = opts;
 
-  if (process.env.FLY_API_TOKEN) {
-    await logToJob(jobId, "INFO", "[DEPLOY] ensureFlyctl: checking...");
-    const flyReady = ensureFlyctl();
-    await logToJob(jobId, "INFO", `[DEPLOY] ensureFlyctl: available=${flyReady}`);
+  await logToJob(jobId, "INFO", "[DEPLOY] ensureFlyctl: checking...");
+  const flyReady = ensureFlyctl();
+  await logToJob(jobId, "INFO", `[DEPLOY] ensureFlyctl: available=${flyReady}`);
+
+  if (!flyReady) {
+    const error = "FAILED: flyctl is not available after all install attempts. Cannot deploy to Fly without flyctl.";
+    await logToJob(jobId, "ERROR", `[DEPLOY] ${error}`);
+
+    const appName = generateAppName(projectId);
+    const flyDeployment = await prisma.flyDeployment.create({
+      data: {
+        userId,
+        projectId,
+        ...(queueJobId ? { queueJobId } : {}),
+        ...(jobId ? { jobId } : {}),
+        status: "FAILED",
+        appName,
+        error,
+      },
+    });
+    return { flyDeploymentId: flyDeployment.id, status: "FAILED", error };
   }
 
-  const appName = getAppName(projectId);
+  const appName = generateAppName(projectId);
   const region = getFlyRegion();
   const org = getFlyOrg();
 
@@ -523,7 +524,7 @@ export async function deployToFly(opts: {
 
   const flyToken = process.env.FLY_API_TOKEN;
   if (!flyToken) {
-    const reason = "Fly deploy skipped: FLY_API_TOKEN not set. Set FLY_API_TOKEN to enable Fly.io deployments.";
+    const reason = "Fly deploy skipped: FLY_API_TOKEN not set.";
     await logToJob(jobId, "WARN", `[DEPLOY] ${reason}`);
     await prisma.flyDeployment.update({
       where: { id: flyDeployment.id },
@@ -532,7 +533,7 @@ export async function deployToFly(opts: {
     return { flyDeploymentId: flyDeployment.id, status: "FAILED", error: reason };
   }
 
-  await logToJob(jobId, "INFO", `[DEPLOY] Starting Fly.io deployment for app '${appName}' in region '${region}'`);
+  await logToJob(jobId, "INFO", `[DEPLOY] Starting Fly.io deployment for NEW app '${appName}' in region '${region}'`);
 
   let dockerContextPath: string;
   try {
@@ -564,19 +565,12 @@ export async function deployToFly(opts: {
     return { flyDeploymentId: flyDeployment.id, status: "FAILED", error };
   }
 
-  let deployResult: { success: boolean; error?: string };
-
-  if (hasFlyctl()) {
-    deployResult = await deployWithFlyctl(appName, workspacePath, region, jobId);
-  } else {
-    deployResult = await deployWithMachinesApi(appName, workspacePath, flyToken, region, jobId);
-  }
-
-  const flyUrl = `https://${appName}.fly.dev`;
+  const deployResult = await deployWithFlyctl(appName, workspacePath, region, jobId);
 
   if (deployResult.success) {
+    const flyUrl = `https://${appName}.fly.dev`;
     await logToJob(jobId, "SUCCESS", `[DEPLOY] Fly deployment succeeded!`);
-    await logToJob(jobId, "INFO", `[DEPLOY] Fly URL: ${flyUrl}`);
+    await logToJob(jobId, "INFO", `[DEPLOY] Fly URL (pending acceptance): ${flyUrl}`);
     await prisma.flyDeployment.update({
       where: { id: flyDeployment.id },
       data: { status: "SUCCESS", url: flyUrl },
@@ -588,7 +582,7 @@ export async function deployToFly(opts: {
   await logToJob(jobId, "ERROR", `[DEPLOY] FAILED: ${error}`);
   await prisma.flyDeployment.update({
     where: { id: flyDeployment.id },
-    data: { status: "FAILED", error, url: flyUrl },
+    data: { status: "FAILED", error },
   });
-  return { flyDeploymentId: flyDeployment.id, status: "FAILED", url: flyUrl, error };
+  return { flyDeploymentId: flyDeployment.id, status: "FAILED", error };
 }
