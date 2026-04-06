@@ -66,6 +66,7 @@ function runCommand(
       NEXT_TELEMETRY_DISABLED: "1",
       NEXT_BUILD_WORKER_COUNT: "1",
       NODE_OPTIONS: "--max-old-space-size=1536",
+      DATABASE_URL: `file:${path.join(cwd, "prisma", "dev.db")}`,
     };
 
     const proc = spawn(cmd, args, {
@@ -264,6 +265,8 @@ async function processQueueJob(queueJob: {
     await log(jobId, "SUCCESS", "[WORKER] Step 1/2: npm install completed");
 
     await log(jobId, "INFO", "[WORKER] Step 2/2: npm run build...");
+    await log(jobId, "INFO", `[WORKER] Build env: UV_THREADPOOL_SIZE=1 NEXT_BUILD_WORKER_COUNT=1 NODE_OPTIONS=--max-old-space-size=1536 NEXT_TELEMETRY_DISABLED=1`);
+    await log(jobId, "INFO", `[WORKER] Build env PATH=${process.env.PATH}`);
     const buildResult = await runCommand(
       "npm", ["run", "build"], workspaceDir, BUILD_TIMEOUT,
       async (line) => {
