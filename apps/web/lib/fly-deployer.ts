@@ -34,10 +34,14 @@ function ensureFlyctl(): boolean {
 
   const checkPaths = [
     "/usr/local/bin/flyctl",
+    "/root/.fly/bin/flyctl",
     path.join(flyBin, "flyctl"),
   ];
+  const seen = new Set<string>();
 
   for (const p of checkPaths) {
+    if (seen.has(p)) continue;
+    seen.add(p);
     const exists = fs.existsSync(p);
     console.log(`[DEPLOY] ensureFlyctl: checking ${p} — exists=${exists}`);
     if (exists) {
@@ -131,9 +135,13 @@ function findFlyctlPath(): string {
   const home = process.env.HOME || "/root";
   const candidates = [
     "/usr/local/bin/flyctl",
+    "/root/.fly/bin/flyctl",
     path.join(home, ".fly", "bin", "flyctl"),
   ];
+  const checked = new Set<string>();
   for (const p of candidates) {
+    if (checked.has(p)) continue;
+    checked.add(p);
     if (fs.existsSync(p)) {
       try {
         const r = spawnSync(p, ["version"], { timeout: 5000, encoding: "utf-8" });
