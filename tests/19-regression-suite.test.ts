@@ -694,7 +694,7 @@ describe("ensureFlyctl pinned version", () => {
   it("583 fly-deployer ensureFlyctl uses pinned version, logs to JobLog", async () => {
     const source = await import("fs").then(f => f.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8"));
     expect(source).toContain("FLYCTL_VERSION");
-    expect(source).toContain("v8-joblog");
+    expect(source).toContain("v9-curl-preflight");
     expect(source).not.toContain("releases/latest/download");
     const match = source.match(/FLYCTL_VERSION\s*=\s*"([^"]+)"/);
     expect(match).toBeTruthy();
