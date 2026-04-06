@@ -232,9 +232,9 @@ primary_region = "${region}"
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = "suspend"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
 [[vm]]
   memory = "512mb"
