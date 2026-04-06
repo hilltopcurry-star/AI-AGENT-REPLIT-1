@@ -62,6 +62,10 @@ function runCommand(
       npm_config_cache: path.join(cwd, ".npm-cache"),
       TMPDIR: cwd,
       XDG_CONFIG_HOME: path.join(cwd, ".config"),
+      UV_THREADPOOL_SIZE: "1",
+      NEXT_TELEMETRY_DISABLED: "1",
+      NEXT_BUILD_WORKER_COUNT: "1",
+      NODE_OPTIONS: "--max-old-space-size=1536",
     };
 
     const proc = spawn(cmd, args, {
