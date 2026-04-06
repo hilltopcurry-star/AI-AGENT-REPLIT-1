@@ -8,93 +8,29 @@ import { getSpecLogLines, specHasComplexApp, MIN_FILES_FOR_COMPLEX_APP } from ".
 const prisma = new PrismaClient();
 const WORKER_ID = process.env.WORKER_ID || `worker-${process.pid}`;
 
-const FLYCTL_VERSION = "0.4.29";
-
-function ensureFlyctl(): boolean {
-  console.log(`[${WORKER_ID}] ensureFlyctl: v7-build-time-preferred (${FLYCTL_VERSION})`);
+function prepareWorkerPath(): void {
   const home = process.env.HOME || "/root";
   const flyBin = path.join(home, ".fly", "bin");
-  process.env.PATH = `/usr/local/bin:${flyBin}:/usr/bin:${process.env.PATH}`;
+  process.env.PATH = `/usr/local/bin:/root/.fly/bin:${flyBin}:/usr/bin:${process.env.PATH}`;
+  console.log(`[${WORKER_ID}] PATH prepended: /usr/local/bin:/root/.fly/bin:${flyBin}:/usr/bin`);
+  console.log(`[${WORKER_ID}] Full PATH: ${process.env.PATH}`);
 
-  const checkPaths = [
-    "/usr/local/bin/flyctl",
-    path.join(flyBin, "flyctl"),
-  ];
+  const checkPaths = ["/usr/local/bin/flyctl", "/root/.fly/bin/flyctl", path.join(flyBin, "flyctl")];
+  const seen = new Set<string>();
   for (const p of checkPaths) {
-    if (fs.existsSync(p)) {
+    if (seen.has(p)) continue;
+    seen.add(p);
+    const exists = fs.existsSync(p);
+    console.log(`[${WORKER_ID}] flyctl check: ${p} exists=${exists}`);
+    if (exists) {
       try {
         const r = spawnSync(p, ["version"], { timeout: 5000, encoding: "utf-8" });
-        if (r.status === 0) {
-          console.log(`[${WORKER_ID}] ensureFlyctl: found at ${p} — ${(r.stdout || "").trim().split("\n")[0]}`);
-          return true;
-        }
-      } catch {}
-    }
-  }
-
-  try {
-    const r = spawnSync("flyctl", ["version"], { timeout: 5000, encoding: "utf-8" });
-    if (r.status === 0) {
-      console.log(`[${WORKER_ID}] ensureFlyctl: already on PATH — ${(r.stdout || "").trim().split("\n")[0]}`);
-      return true;
-    }
-  } catch {}
-
-  console.log(`[${WORKER_ID}] ensureFlyctl: not found, installing to ${flyBin}...`);
-  try { fs.mkdirSync(flyBin, { recursive: true }); } catch {}
-
-  const tarUrl = `https://github.com/superfly/flyctl/releases/download/v${FLYCTL_VERSION}/flyctl_${FLYCTL_VERSION}_Linux_x86_64.tar.gz`;
-  console.log(`[${WORKER_ID}] ensureFlyctl: downloading ${tarUrl}`);
-
-  try {
-    execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 });
-    execSync(`curl -fsSL --retry 3 --retry-delay 5 --connect-timeout 15 -o /tmp/flyctl.tar.gz "${tarUrl}"`, { timeout: 120000, encoding: "utf-8" });
-
-    const stat = fs.statSync("/tmp/flyctl.tar.gz");
-    if (stat.size < 1000) {
-      console.error(`[${WORKER_ID}] ensureFlyctl: download too small (${stat.size} bytes)`);
-    } else {
-      console.log(`[${WORKER_ID}] ensureFlyctl: downloaded ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
-      execSync("tar -xzf /tmp/flyctl.tar.gz -C /tmp", { timeout: 30000, encoding: "utf-8" });
-
-      if (fs.existsSync("/tmp/flyctl")) {
-        const dest = path.join(flyBin, "flyctl");
-        fs.copyFileSync("/tmp/flyctl", dest);
-        fs.chmodSync(dest, 0o755);
-        const r = spawnSync(dest, ["version"], { timeout: 5000, encoding: "utf-8" });
-        if (r.status === 0) {
-          console.log(`[${WORKER_ID}] ensureFlyctl: OK — ${(r.stdout || "").trim().split("\n")[0]}`);
-          return true;
-        }
-        console.error(`[${WORKER_ID}] ensureFlyctl: version check failed after copy`);
-      } else {
-        console.error(`[${WORKER_ID}] ensureFlyctl: flyctl binary not in tar`);
+        console.log(`[${WORKER_ID}] flyctl check: ${p} exit=${r.status} stdout="${(r.stdout || "").trim().split("\n")[0]}"`);
+      } catch (e) {
+        console.log(`[${WORKER_ID}] flyctl check: ${p} error=${e instanceof Error ? e.message : e}`);
       }
     }
-  } catch (e: unknown) {
-    console.error(`[${WORKER_ID}] ensureFlyctl: tar download failed: ${(e as Error).message || e}`);
   }
-
-  console.log(`[${WORKER_ID}] ensureFlyctl: trying install.sh fallback...`);
-  try {
-    execSync(`curl -fsSL "https://fly.io/install.sh" | sh`, {
-      timeout: 120000,
-      encoding: "utf-8",
-      env: { ...process.env, FLYCTL_INSTALL: path.join(home, ".fly") },
-    });
-  } catch {}
-  const homeFlyctl = path.join(flyBin, "flyctl");
-  if (fs.existsSync(homeFlyctl)) {
-    const r = spawnSync(homeFlyctl, ["version"], { timeout: 5000, encoding: "utf-8" });
-    if (r.status === 0) {
-      console.log(`[${WORKER_ID}] ensureFlyctl: install.sh OK — ${(r.stdout || "").trim().split("\n")[0]}`);
-      return true;
-    }
-  }
-
-  try { execSync("rm -f /tmp/flyctl.tar.gz /tmp/flyctl", { timeout: 5000 }); } catch {}
-  console.error(`[${WORKER_ID}] ensureFlyctl: all attempts failed`);
-  return false;
 }
 const POLL_INTERVAL_MS = parseInt(process.env.WORKER_POLL_MS || "3000", 10);
 const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT_BUILDS_PER_WORKER || "2", 10);
@@ -508,11 +444,11 @@ async function main() {
   console.log(`[worker] flyctlInstaller=v3-direct-download`);
   console.log(`[${WORKER_ID}] Build worker started (max concurrent: ${MAX_CONCURRENT}, poll: ${POLL_INTERVAL_MS}ms)`);
 
+  prepareWorkerPath();
   if (process.env.FLY_API_TOKEN) {
-    const flyReady = ensureFlyctl();
-    console.log(`[${WORKER_ID}] flyctl available: ${flyReady}`);
+    console.log(`[${WORKER_ID}] FLY_API_TOKEN present — flyctl install/check deferred to deployToFly()`);
   } else {
-    console.log(`[${WORKER_ID}] FLY_API_TOKEN not set, skipping flyctl install`);
+    console.log(`[${WORKER_ID}] FLY_API_TOKEN not set, skipping fly deploys`);
   }
 
   process.on("SIGTERM", () => {
