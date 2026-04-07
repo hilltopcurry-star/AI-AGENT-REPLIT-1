@@ -58,7 +58,9 @@ function runCommand(
     const safeEnv: NodeJS.ProcessEnv = {
       PATH: systemPath,
       HOME: cwd,
-      NODE_ENV: "production",
+      NODE_ENV: "development",
+      NPM_CONFIG_PRODUCTION: "false",
+      npm_config_production: "false",
       npm_config_cache: path.join(cwd, ".npm-cache"),
       TMPDIR: cwd,
       XDG_CONFIG_HOME: path.join(cwd, ".config"),
@@ -66,6 +68,7 @@ function runCommand(
       NEXT_TELEMETRY_DISABLED: "1",
       NEXT_BUILD_WORKER_COUNT: "1",
       NODE_OPTIONS: "--max-old-space-size=1536",
+      CI: "1",
       DATABASE_URL: `file:${path.join(cwd, "prisma", "dev.db")}`,
     };
 
@@ -265,7 +268,7 @@ async function processQueueJob(queueJob: {
     await log(jobId, "SUCCESS", "[WORKER] Step 1/2: npm install completed");
 
     await log(jobId, "INFO", "[WORKER] Step 2/2: npm run build...");
-    await log(jobId, "INFO", `[WORKER] Build env: UV_THREADPOOL_SIZE=1 NEXT_BUILD_WORKER_COUNT=1 NODE_OPTIONS=--max-old-space-size=1536 NEXT_TELEMETRY_DISABLED=1`);
+    await log(jobId, "INFO", `[WORKER] Build env: NODE_ENV=development NPM_CONFIG_PRODUCTION=false UV_THREADPOOL_SIZE=1 NEXT_BUILD_WORKER_COUNT=1 NODE_OPTIONS=--max-old-space-size=1536 CI=1`);
     await log(jobId, "INFO", `[WORKER] Build env PATH=${process.env.PATH}`);
     const buildResult = await runCommand(
       "npm", ["run", "build"], workspaceDir, BUILD_TIMEOUT,
