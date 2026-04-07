@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
 import * as fs from "fs";
 import * as path from "path";
-import { execSync, spawnSync } from "child_process";
+import { execSync, spawnSync, spawn } from "child_process";
 
 const FLY_API_BASE = "https://api.machines.dev/v1";
 
@@ -215,6 +215,111 @@ function flyctlEnv(): NodeJS.ProcessEnv {
   };
 }
 
+interface RunFlyctlResult {
+  exitCode: number | null;
+  timedOut: boolean;
+  lastLines: string[];
+  allOutput: string;
+}
+
+async function runFlyctl(
+  flyctlPath: string,
+  args: string[],
+  opts: {
+    cwd?: string;
+    timeoutMs: number;
+    jobId: string | null;
+    streamLogs?: boolean;
+    logPrefix?: string;
+  }
+): Promise<RunFlyctlResult> {
+  const { cwd, timeoutMs, jobId, streamLogs = false, logPrefix = "[flyctl]" } = opts;
+
+  return new Promise<RunFlyctlResult>((resolve) => {
+    const child = spawn(flyctlPath, args, {
+      cwd,
+      env: flyctlEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const outputLines: string[] = [];
+    let killed = false;
+    let stdoutBuf = "";
+    let stderrBuf = "";
+
+    const pendingLogs: string[] = [];
+    let flushing = false;
+
+    async function flushLogs() {
+      if (flushing || !jobId) return;
+      flushing = true;
+      while (pendingLogs.length > 0) {
+        const line = pendingLogs.shift()!;
+        try { await logToJob(jobId, "INFO", line); } catch {}
+      }
+      flushing = false;
+    }
+
+    function processLine(line: string) {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      outputLines.push(trimmed);
+      if (streamLogs && jobId) {
+        pendingLogs.push(`[DEPLOY] ${logPrefix} ${trimmed.substring(0, 300)}`);
+        flushLogs();
+      }
+    }
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdoutBuf += chunk.toString();
+      const parts = stdoutBuf.split("\n");
+      stdoutBuf = parts.pop() || "";
+      for (const p of parts) processLine(p);
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderrBuf += chunk.toString();
+      const parts = stderrBuf.split("\n");
+      stderrBuf = parts.pop() || "";
+      for (const p of parts) processLine(p);
+    });
+
+    const timer = setTimeout(() => {
+      killed = true;
+      try { child.kill("SIGKILL"); } catch {}
+    }, timeoutMs);
+
+    child.on("close", async (code) => {
+      clearTimeout(timer);
+      if (stdoutBuf.trim()) processLine(stdoutBuf);
+      if (stderrBuf.trim()) processLine(stderrBuf);
+
+      while (pendingLogs.length > 0) {
+        await flushLogs();
+        if (pendingLogs.length > 0) await new Promise(r => setTimeout(r, 50));
+      }
+
+      resolve({
+        exitCode: killed ? null : code,
+        timedOut: killed,
+        lastLines: outputLines.slice(-20),
+        allOutput: outputLines.join("\n"),
+      });
+    });
+
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      outputLines.push(`spawn error: ${err.message}`);
+      resolve({
+        exitCode: null,
+        timedOut: false,
+        lastLines: outputLines.slice(-20),
+        allOutput: outputLines.join("\n"),
+      });
+    });
+  });
+}
+
 async function ensureFlyApp(
   appName: string,
   token: string,
@@ -227,25 +332,28 @@ async function ensureFlyApp(
 
   if (flyctl) {
     for (let attempt = 1; attempt <= 3; attempt++) {
-      await logToJob(jobId, "INFO", `[DEPLOY] Creating Fly app '${appName}' via flyctl (attempt ${attempt}/3)...`);
-      const result = spawnSync(
-        flyctl,
-        ["apps", "create", appName, "--org", org, "--json"],
-        { timeout: 120000, encoding: "utf-8", env: flyctlEnv() }
-      );
-      const output = ((result.stdout || "") + " " + (result.stderr || "")).trim();
-      await logToJob(jobId, "INFO", `[DEPLOY] flyctl apps create exit=${result.status} output=${output.substring(0, 500)}`);
+      await logToJob(jobId, "INFO", `[DEPLOY] Creating Fly app '${appName}' in org '${org}' via flyctl (attempt ${attempt}/3)...`);
 
-      if (result.status === 0) {
+      const result = await runFlyctl(flyctl, ["apps", "create", appName, "--org", org], {
+        timeoutMs: 60000,
+        jobId,
+      });
+
+      await logToJob(jobId, "INFO", `[DEPLOY] flyctl apps create exit=${result.exitCode} timedOut=${result.timedOut} app=${appName} org=${org}`);
+
+      if (result.exitCode === 0) {
         await logToJob(jobId, "SUCCESS", `[DEPLOY] Fly app '${appName}' created`);
         return true;
       }
-      if (output.includes("already exists")) {
+      if (result.allOutput.includes("already exists")) {
         await logToJob(jobId, "INFO", `[DEPLOY] Fly app '${appName}' already exists`);
         return true;
       }
-      if (result.status === null) {
-        await logToJob(jobId, "WARN", `[DEPLOY] flyctl apps create timed out after 120s (attempt ${attempt}/3)`);
+      if (result.timedOut) {
+        await logToJob(jobId, "WARN", `[DEPLOY] flyctl apps create timed out after 60s (attempt ${attempt}/3)`);
+      } else {
+        const errSnippet = result.lastLines.slice(-3).join(" ").substring(0, 300);
+        await logToJob(jobId, "WARN", `[DEPLOY] flyctl apps create failed (attempt ${attempt}/3): ${errSnippet}`);
       }
       if (attempt < 3) {
         await logToJob(jobId, "INFO", `[DEPLOY] Retrying in 10s...`);
@@ -259,7 +367,7 @@ async function ensureFlyApp(
   await logToJob(jobId, "INFO", `[DEPLOY] Creating Fly app '${appName}' via API in org '${org}'...`);
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 120000);
+    const timer = setTimeout(() => controller.abort(), 60000);
     const create = await flyApiRequest("POST", "/apps", token, { app_name: appName, org_slug: org });
     clearTimeout(timer);
 
@@ -272,7 +380,7 @@ async function ensureFlyApp(
       await logToJob(jobId, "INFO", `[DEPLOY] Fly app '${appName}' already exists (confirmed)`);
       return true;
     }
-    await logToJob(jobId, "ERROR", `[DEPLOY] Failed to create Fly app via API: ${errMsg}`);
+    await logToJob(jobId, "ERROR", `[DEPLOY] Failed to create Fly app via API: ${errMsg.substring(0, 300)}`);
   } catch (e) {
     await logToJob(jobId, "ERROR", `[DEPLOY] Fly API app create error: ${e instanceof Error ? e.message : e}`);
   }
@@ -310,6 +418,20 @@ async function destroyFlyApp(appName: string, token: string, jobId: string | nul
   return false;
 }
 
+async function runFlyctlDeploy(
+  flyctlPath: string,
+  workspacePath: string,
+  jobId: string | null
+): Promise<RunFlyctlResult> {
+  return runFlyctl(flyctlPath, ["deploy", "--now", "--remote-only", "--depot=false", "--no-cache", "--yes"], {
+    cwd: workspacePath,
+    timeoutMs: 600000,
+    jobId,
+    streamLogs: true,
+    logPrefix: "[flyctl-deploy]",
+  });
+}
+
 async function deployWithFlyctl(
   appName: string,
   workspacePath: string,
@@ -321,7 +443,7 @@ async function deployWithFlyctl(
     return { success: false, error: "flyctl binary not found by findFlyctlPath()" };
   }
 
-  await logToJob(jobId, "INFO", `[DEPLOY] Deploying '${appName}' via ${flyctl} from ${workspacePath}...`);
+  await logToJob(jobId, "INFO", `[DEPLOY] Deploying '${appName}' via flyctl from ${workspacePath}...`);
 
   try {
     const writeFlyToml = () => {
@@ -353,31 +475,16 @@ primary_region = "${region}"
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       await logToJob(jobId, "INFO", `[DEPLOY] flyctl deploy attempt ${attempt}/${maxAttempts}...`);
 
-      const result = spawnSync(
-        flyctl,
-        ["deploy", "--now", "--remote-only", "--depot=false", "--no-cache", "--yes"],
-        {
-          cwd: workspacePath,
-          timeout: 600000,
-          encoding: "utf-8",
-          env: flyctlEnv(),
-        }
-      );
+      const result = await runFlyctlDeploy(flyctl, workspacePath, jobId);
 
-      const output = (result.stdout || "") + "\n" + (result.stderr || "");
-      const lines = output.split("\n").filter((l: string) => l.trim());
-      for (const line of lines.slice(-20)) {
-        await logToJob(jobId, "INFO", `[DEPLOY] [flyctl] ${line.substring(0, 300)}`);
-      }
-
-      if (result.status === null) {
+      if (result.timedOut) {
         await logToJob(jobId, "WARN", `[DEPLOY] flyctl deploy timed out after 600s on attempt ${attempt}`);
-      } else if (result.status === 0) {
+      } else if (result.exitCode === 0) {
         await logToJob(jobId, "SUCCESS", `[DEPLOY] flyctl deploy succeeded for '${appName}' on attempt ${attempt}`);
         return { success: true };
       }
 
-      const isRegistryError = output.includes("failed to push registry") || output.includes("unexpected status from HEAD request");
+      const isRegistryError = result.allOutput.includes("failed to push registry") || result.allOutput.includes("unexpected status from HEAD request");
       if (isRegistryError) {
         registryFailCount++;
         if (attempt < maxAttempts) {
@@ -385,8 +492,9 @@ primary_region = "${region}"
           await new Promise(r => setTimeout(r, 15000));
           continue;
         }
-      } else if (result.status !== null) {
-        return { success: false, error: `flyctl deploy failed (exit ${result.status}): ${lines.slice(-3).join(" ")}` };
+      } else if (!result.timedOut) {
+        const errSnippet = result.lastLines.slice(-3).join(" ").substring(0, 500);
+        return { success: false, error: `flyctl deploy failed (exit ${result.exitCode}): ${errSnippet}` };
       }
     }
 
@@ -401,26 +509,13 @@ primary_region = "${region}"
         if (recreated) {
           writeFlyToml();
           await logToJob(jobId, "INFO", `[DEPLOY] Final deploy attempt after app recreation...`);
-          const result = spawnSync(
-            flyctl,
-            ["deploy", "--now", "--remote-only", "--depot=false", "--no-cache", "--yes"],
-            {
-              cwd: workspacePath,
-              timeout: 600000,
-              encoding: "utf-8",
-              env: flyctlEnv(),
-            }
-          );
-          const output = (result.stdout || "") + "\n" + (result.stderr || "");
-          const lines = output.split("\n").filter((l: string) => l.trim());
-          for (const line of lines.slice(-20)) {
-            await logToJob(jobId, "INFO", `[DEPLOY] [flyctl] ${line.substring(0, 300)}`);
-          }
-          if (result.status === 0) {
+          const result = await runFlyctlDeploy(flyctl, workspacePath, jobId);
+          if (result.exitCode === 0) {
             await logToJob(jobId, "SUCCESS", `[DEPLOY] flyctl deploy succeeded after app recreation!`);
             return { success: true };
           }
-          return { success: false, error: `flyctl deploy failed after app recreation (exit ${result.status}): ${lines.slice(-3).join(" ")}` };
+          const errSnippet = result.lastLines.slice(-3).join(" ").substring(0, 500);
+          return { success: false, error: `flyctl deploy failed after recreation (exit ${result.exitCode}): ${errSnippet}` };
         }
       }
     }
