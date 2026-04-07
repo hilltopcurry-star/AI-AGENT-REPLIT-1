@@ -938,7 +938,55 @@ describe("AI Chat template (feature-flagged)", () => {
     delete process.env.ENABLE_AI_CHAT_TEMPLATE;
   });
 
-  it("612 ai-chat-saas prisma schema has Chat and Message models", async () => {
+  it("612 full pipeline: user prompt -> specJson -> templateKey=ai-chat-saas", async () => {
+    process.env.ENABLE_AI_CHAT_TEMPLATE = "1";
+    const { detectTemplateKey, getTemplate } = await import("../apps/web/lib/templates/index");
+
+    const userPrompt = "ChatGPT LLM chatbot web app with streaming sidebar dark mode";
+    const llmPurpose = "An AI-powered chatbot application";
+    const llmFeatures = "streaming responses, dark mode UI, sidebar navigation";
+
+    const combinedPurpose = `${llmPurpose} ${userPrompt}`;
+    const templateKey = detectTemplateKey(combinedPurpose, llmFeatures);
+    expect(templateKey).toBe("ai-chat-saas");
+
+    const template = getTemplate(templateKey!);
+    expect(template).toBeTruthy();
+    expect(template!.requiredRoutes.length).toBeGreaterThan(0);
+    expect(template!.requiredEntities).toContain("Chat");
+    expect(template!.requiredEntities).toContain("Message");
+
+    const spec: Record<string, unknown> = {
+      purpose: llmPurpose,
+      features: llmFeatures,
+      templateKey,
+      requiredModules: template!.requiredModules,
+      requiredRoutes: template!.requiredRoutes,
+      requiredEntities: template!.requiredEntities,
+    };
+    expect(spec.templateKey).toBe("ai-chat-saas");
+    expect((spec.requiredRoutes as string[]).length).toBeGreaterThan(0);
+
+    delete process.env.ENABLE_AI_CHAT_TEMPLATE;
+  });
+
+  it("613 pipeline detects ai-chat when raw user prompt supplements LLM fields", async () => {
+    process.env.ENABLE_AI_CHAT_TEMPLATE = "1";
+    const { detectTemplateKey } = await import("../apps/web/lib/templates/index");
+
+    const userPrompt = "Build me an AI Chat Web App with sidebar";
+    const llmPurpose = "A conversational interface tool";
+    const llmFeatures = "user authentication, responsive design";
+
+    expect(detectTemplateKey(llmPurpose, llmFeatures)).toBeNull();
+
+    const combined = `${llmPurpose} ${userPrompt}`;
+    expect(detectTemplateKey(combined, llmFeatures)).toBe("ai-chat-saas");
+
+    delete process.env.ENABLE_AI_CHAT_TEMPLATE;
+  });
+
+  it("614 ai-chat-saas prisma schema has Chat and Message models", async () => {
     const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
     const schema = aiChatSaasTemplate.getFiles().find(f => f.path === "prisma/schema.prisma");
     expect(schema).toBeTruthy();
