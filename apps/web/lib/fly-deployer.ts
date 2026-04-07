@@ -205,6 +205,16 @@ async function flyApiRequest(
   return { status: resp.status, data };
 }
 
+function flyctlEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    FLYCTL_API_TOKEN: process.env.FLY_API_TOKEN,
+    FLY_API_TOKEN: process.env.FLY_API_TOKEN,
+    CI: "1",
+    FLY_NO_UPDATE_CHECK: "1",
+  };
+}
+
 async function ensureFlyApp(
   appName: string,
   token: string,
@@ -213,30 +223,59 @@ async function ensureFlyApp(
 ): Promise<boolean> {
   await logToJob(jobId, "INFO", `[DEPLOY] Checking if Fly app '${appName}' exists...`);
 
-  const check = await flyApiRequest("GET", `/apps/${appName}`, token);
-  if (check.status === 200) {
-    await logToJob(jobId, "INFO", `[DEPLOY] Fly app '${appName}' already exists`);
-    return true;
+  const flyctl = findFlyctlPath();
+
+  if (flyctl) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await logToJob(jobId, "INFO", `[DEPLOY] Creating Fly app '${appName}' via flyctl (attempt ${attempt}/3)...`);
+      const result = spawnSync(
+        flyctl,
+        ["apps", "create", appName, "--org", org, "--json"],
+        { timeout: 120000, encoding: "utf-8", env: flyctlEnv() }
+      );
+      const output = ((result.stdout || "") + " " + (result.stderr || "")).trim();
+      await logToJob(jobId, "INFO", `[DEPLOY] flyctl apps create exit=${result.status} output=${output.substring(0, 500)}`);
+
+      if (result.status === 0) {
+        await logToJob(jobId, "SUCCESS", `[DEPLOY] Fly app '${appName}' created`);
+        return true;
+      }
+      if (output.includes("already exists")) {
+        await logToJob(jobId, "INFO", `[DEPLOY] Fly app '${appName}' already exists`);
+        return true;
+      }
+      if (result.status === null) {
+        await logToJob(jobId, "WARN", `[DEPLOY] flyctl apps create timed out after 120s (attempt ${attempt}/3)`);
+      }
+      if (attempt < 3) {
+        await logToJob(jobId, "INFO", `[DEPLOY] Retrying in 10s...`);
+        await new Promise(r => setTimeout(r, 10000));
+      }
+    }
+    await logToJob(jobId, "ERROR", `[DEPLOY] Failed to create Fly app '${appName}' after 3 attempts`);
+    return false;
   }
 
-  await logToJob(jobId, "INFO", `[DEPLOY] Creating Fly app '${appName}' in org '${org}'...`);
-  const create = await flyApiRequest("POST", "/apps", token, {
-    app_name: appName,
-    org_slug: org,
-  });
+  await logToJob(jobId, "INFO", `[DEPLOY] Creating Fly app '${appName}' via API in org '${org}'...`);
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120000);
+    const create = await flyApiRequest("POST", "/apps", token, { app_name: appName, org_slug: org });
+    clearTimeout(timer);
 
-  if (create.status === 201 || create.status === 200) {
-    await logToJob(jobId, "SUCCESS", `[DEPLOY] Fly app '${appName}' created`);
-    return true;
+    if (create.status === 201 || create.status === 200) {
+      await logToJob(jobId, "SUCCESS", `[DEPLOY] Fly app '${appName}' created via API`);
+      return true;
+    }
+    const errMsg = typeof create.data === "object" ? JSON.stringify(create.data) : String(create.data);
+    if (errMsg.includes("already exists")) {
+      await logToJob(jobId, "INFO", `[DEPLOY] Fly app '${appName}' already exists (confirmed)`);
+      return true;
+    }
+    await logToJob(jobId, "ERROR", `[DEPLOY] Failed to create Fly app via API: ${errMsg}`);
+  } catch (e) {
+    await logToJob(jobId, "ERROR", `[DEPLOY] Fly API app create error: ${e instanceof Error ? e.message : e}`);
   }
-
-  const errMsg = typeof create.data === "object" ? JSON.stringify(create.data) : String(create.data);
-  if (errMsg.includes("already exists")) {
-    await logToJob(jobId, "INFO", `[DEPLOY] Fly app '${appName}' already exists (confirmed)`);
-    return true;
-  }
-
-  await logToJob(jobId, "ERROR", `[DEPLOY] Failed to create Fly app: ${errMsg}`);
   return false;
 }
 
@@ -251,7 +290,7 @@ async function destroyFlyApp(appName: string, token: string, jobId: string | nul
         {
           timeout: 60000,
           encoding: "utf-8",
-          env: { ...process.env, FLYCTL_API_TOKEN: token, FLY_API_TOKEN: token },
+          env: flyctlEnv(),
         }
       );
       if (result.status === 0) {
@@ -316,12 +355,12 @@ primary_region = "${region}"
 
       const result = spawnSync(
         flyctl,
-        ["deploy", "--now", "--remote-only", "--depot=false", "--no-cache"],
+        ["deploy", "--now", "--remote-only", "--depot=false", "--no-cache", "--yes"],
         {
           cwd: workspacePath,
           timeout: 600000,
           encoding: "utf-8",
-          env: { ...process.env, FLYCTL_API_TOKEN: process.env.FLY_API_TOKEN },
+          env: flyctlEnv(),
         }
       );
 
@@ -331,7 +370,9 @@ primary_region = "${region}"
         await logToJob(jobId, "INFO", `[DEPLOY] [flyctl] ${line.substring(0, 300)}`);
       }
 
-      if (result.status === 0) {
+      if (result.status === null) {
+        await logToJob(jobId, "WARN", `[DEPLOY] flyctl deploy timed out after 600s on attempt ${attempt}`);
+      } else if (result.status === 0) {
         await logToJob(jobId, "SUCCESS", `[DEPLOY] flyctl deploy succeeded for '${appName}' on attempt ${attempt}`);
         return { success: true };
       }
@@ -344,7 +385,7 @@ primary_region = "${region}"
           await new Promise(r => setTimeout(r, 15000));
           continue;
         }
-      } else {
+      } else if (result.status !== null) {
         return { success: false, error: `flyctl deploy failed (exit ${result.status}): ${lines.slice(-3).join(" ")}` };
       }
     }
@@ -362,12 +403,12 @@ primary_region = "${region}"
           await logToJob(jobId, "INFO", `[DEPLOY] Final deploy attempt after app recreation...`);
           const result = spawnSync(
             flyctl,
-            ["deploy", "--now", "--remote-only", "--depot=false", "--no-cache"],
+            ["deploy", "--now", "--remote-only", "--depot=false", "--no-cache", "--yes"],
             {
               cwd: workspacePath,
               timeout: 600000,
               encoding: "utf-8",
-              env: { ...process.env, FLYCTL_API_TOKEN: process.env.FLY_API_TOKEN },
+              env: flyctlEnv(),
             }
           );
           const output = (result.stdout || "") + "\n" + (result.stderr || "");
