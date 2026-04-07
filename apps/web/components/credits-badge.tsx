@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { Coins, Zap, ZapOff, Shield, Crown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface BalanceData {
   balance: number;
@@ -46,16 +46,26 @@ export function AiStatusBadge() {
   const { forced, toggle } = useForceBasicMode();
   const queryClient = useQueryClient();
 
-  const { data } = useQuery<AiStatusData>({
+  const { data, dataUpdatedAt } = useQuery<AiStatusData>({
     queryKey: ["/api/ai/status"],
     queryFn: () => fetch("/api/ai/status").then((r) => r.json()),
-    refetchInterval: 30000,
+    refetchInterval: 15000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    staleTime: 0,
+    gcTime: 60000,
   });
+
+  useEffect(() => {
+    if (data && !data.limited && forced) {
+      toggle(false);
+    }
+  }, [data, dataUpdatedAt, forced, toggle]);
 
   if (!data) return null;
 
   const isLlmEnabled = data.llmEnabled;
-  const isLimited = data.limited || forced;
+  const isLimited = data.limited && !forced ? data.limited : forced;
 
   const handleClick = () => {
     if (!isLlmEnabled) return;
@@ -139,7 +149,11 @@ export function AiQuotaBadge() {
   const { data } = useQuery<AiQuotaData>({
     queryKey: ["/api/ai/quota"],
     queryFn: () => fetch("/api/ai/quota").then((r) => r.json()),
-    refetchInterval: 30000,
+    refetchInterval: 15000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    staleTime: 0,
+    gcTime: 60000,
   });
 
   if (!data || !data.enabled) return null;
@@ -194,7 +208,11 @@ export function CreditsBadge() {
   const { data } = useQuery<BalanceData>({
     queryKey: ["/api/billing/balance"],
     queryFn: () => fetch("/api/billing/balance").then((r) => r.json()),
-    refetchInterval: 30000,
+    refetchInterval: 15000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    staleTime: 0,
+    gcTime: 60000,
   });
 
   if (!data || !data.enabled) return null;
@@ -249,6 +267,9 @@ export function PlanBadge() {
     queryKey: ["/api/billing/plan"],
     queryFn: () => fetch("/api/billing/plan").then((r) => r.json()),
     refetchInterval: 60000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    staleTime: 10000,
   });
 
   if (!data) return null;
@@ -289,7 +310,11 @@ export function CreditsBanner() {
   const { data } = useQuery<BalanceData>({
     queryKey: ["/api/billing/balance"],
     queryFn: () => fetch("/api/billing/balance").then((r) => r.json()),
-    refetchInterval: 30000,
+    refetchInterval: 15000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    staleTime: 0,
+    gcTime: 60000,
   });
 
   if (!data || !data.enabled || data.admin) return null;
