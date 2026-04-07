@@ -174,6 +174,59 @@ async function checkProjectsPage(baseUrl: string, templateKey: string): Promise<
   }
 }
 
+async function checkChatHomepage(baseUrl: string, templateKey: string): Promise<CheckResult> {
+  try {
+    const { status, body } = await httpGet(baseUrl);
+    if (status !== 200) {
+      return { name: "chatHomepage", passed: false, detail: `GET / returned status=${status}` };
+    }
+    const lower = body.toLowerCase();
+    const hasMarker = lower.includes(`content="${templateKey}"`);
+    if (hasMarker) {
+      return { name: "chatHomepage", passed: true, detail: `GET / 200 + template marker "${templateKey}" found` };
+    }
+    const signals = [
+      lower.includes("chat"),
+      lower.includes("message") || lower.includes("conversation"),
+      lower.includes("ai") || lower.includes("assistant"),
+    ];
+    const signalCount = signals.filter(Boolean).length;
+    if (signalCount >= 2) {
+      return { name: "chatHomepage", passed: true, detail: `GET / 200 + ${signalCount} chat signals found` };
+    }
+    return { name: "chatHomepage", passed: false, detail: `GET / 200 but only ${signalCount}/2 chat signals` };
+  } catch (e: any) {
+    return { name: "chatHomepage", passed: false, detail: `error: ${e.message}` };
+  }
+}
+
+async function checkChatCrud(baseUrl: string): Promise<CheckResult> {
+  try {
+    const chatRes = await httpPost(`${baseUrl}/api/chats`, { title: "Smoke Test Chat" });
+    if (chatRes.status !== 201 && chatRes.status !== 200) {
+      return { name: "chatCrud", passed: false, detail: `POST /api/chats failed: status=${chatRes.status}` };
+    }
+    let chatId: string;
+    try { chatId = JSON.parse(chatRes.body).id; } catch {
+      return { name: "chatCrud", passed: false, detail: "Could not parse chat response" };
+    }
+
+    const msgRes = await httpPost(`${baseUrl}/api/chats/${chatId}/messages`, { content: "Hello test" });
+    if (msgRes.status !== 201 && msgRes.status !== 200) {
+      return { name: "chatCrud", passed: false, detail: `POST messages failed: status=${msgRes.status}` };
+    }
+
+    const detailRes = await httpGet(`${baseUrl}/api/chats/${chatId}`);
+    if (detailRes.status !== 200) {
+      return { name: "chatCrud", passed: false, detail: `GET /api/chats/${chatId} returned status=${detailRes.status}` };
+    }
+
+    return { name: "chatCrud", passed: true, detail: "Created chat + message, detail API verified" };
+  } catch (e: any) {
+    return { name: "chatCrud", passed: false, detail: `error: ${e.message}` };
+  }
+}
+
 async function checkCrud(baseUrl: string): Promise<CheckResult> {
   try {
     const projRes = await httpPost(`${baseUrl}/api/projects`, {
@@ -253,7 +306,27 @@ export async function runAcceptanceChecks(
   await logJob(jobId, pageResult.passed ? "SUCCESS" : "ERROR",
     `[ACCEPTANCE] homepage ${pageResult.passed ? "OK" : "FAIL"}: ${pageResult.detail}`);
 
-  if (templateKey) {
+  if (templateKey === "ai-chat-saas") {
+    const chatHomeResult = await checkChatHomepage(effectiveUrl, templateKey);
+    checks.push(chatHomeResult);
+    await logJob(jobId, chatHomeResult.passed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] chatHomepage ${chatHomeResult.passed ? "OK" : "FAIL"}: ${chatHomeResult.detail}`);
+
+    const dbResult = await checkDbConnection(effectiveUrl);
+    checks.push(dbResult);
+    await logJob(jobId, dbResult.passed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] db-check ${dbResult.passed ? "OK" : "FAIL"}: ${dbResult.detail}`);
+
+    const chatCrudResult = await checkChatCrud(effectiveUrl);
+    checks.push(chatCrudResult);
+    await logJob(jobId, chatCrudResult.passed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] chatCrud ${chatCrudResult.passed ? "OK" : "FAIL"}: ${chatCrudResult.detail}`);
+
+    const summary = `chatHomepage:${chatHomeResult.passed ? "OK" : "FAIL"} dbCheck:${dbResult.passed ? "OK" : "FAIL"} chatCrud:${chatCrudResult.passed ? "OK" : "FAIL"}`;
+    const allPassed = chatHomeResult.passed && dbResult.passed && chatCrudResult.passed;
+    await logJob(jobId, allPassed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] result=${allPassed ? "PASS" : "FAIL"} checks=${summary}`);
+  } else if (templateKey) {
     const projectsResult = await checkProjectsPage(effectiveUrl, templateKey);
     checks.push(projectsResult);
     await logJob(jobId, projectsResult.passed ? "SUCCESS" : "ERROR",
