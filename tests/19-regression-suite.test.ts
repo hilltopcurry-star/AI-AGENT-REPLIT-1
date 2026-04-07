@@ -825,3 +825,117 @@ describe("Proxy acceptance token auth", () => {
     expect(source).toContain("Provider: replit-proxy");
   });
 });
+
+describe("AI Chat template (feature-flagged)", () => {
+  it("600 ai-chat-saas template exists and has correct structure", async () => {
+    const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
+    expect(aiChatSaasTemplate.key).toBe("ai-chat-saas");
+    expect(aiChatSaasTemplate.requiredEntities).toContain("Chat");
+    expect(aiChatSaasTemplate.requiredEntities).toContain("Message");
+    expect(aiChatSaasTemplate.requiredRoutes).toContain("/api/chats");
+    expect(aiChatSaasTemplate.requiredRoutes).toContain("/api/chats/[chatId]/messages");
+    const files = aiChatSaasTemplate.getFiles();
+    expect(files.length).toBeGreaterThan(8);
+    const paths = files.map(f => f.path);
+    expect(paths).toContain("app/api/chats/route.ts");
+    expect(paths).toContain("app/api/chats/[chatId]/messages/route.ts");
+    expect(paths).toContain("app/api/chats/[chatId]/route.ts");
+    expect(paths).toContain("app/api/health/route.ts");
+    expect(paths).toContain("app/page.tsx");
+  });
+
+  it("601 ai-chat-saas has template marker in layout", async () => {
+    const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
+    const layout = aiChatSaasTemplate.getFiles().find(f => f.path === "app/layout.tsx");
+    expect(layout).toBeTruthy();
+    expect(layout!.content).toContain('content="ai-chat-saas"');
+  });
+
+  it("602 ai-chat-saas has uiKeywords for strict detection", async () => {
+    const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
+    expect(aiChatSaasTemplate.uiKeywords).toBeTruthy();
+    expect(aiChatSaasTemplate.uiKeywords!.length).toBeGreaterThan(3);
+  });
+
+  it("603 detectTemplateKey requires 2 AI keywords + 1 UI keyword for ai-chat-saas", async () => {
+    process.env.ENABLE_AI_CHAT_TEMPLATE = "1";
+    const mod = await import("../apps/web/lib/templates/index");
+    const detect = mod.detectTemplateKey;
+    expect(detect("build a chatgpt clone", "chat interface with sidebar")).toBe("ai-chat-saas");
+    expect(detect("ai chatbot assistant", "conversational ui app")).toBe("ai-chat-saas");
+    expect(detect("build an llm powered chatbot", "web app with messages")).toBe("ai-chat-saas");
+    delete process.env.ENABLE_AI_CHAT_TEMPLATE;
+  });
+
+  it("604 detectTemplateKey does NOT trigger ai-chat-saas on weak signals", async () => {
+    process.env.ENABLE_AI_CHAT_TEMPLATE = "1";
+    const mod = await import("../apps/web/lib/templates/index");
+    const detect = mod.detectTemplateKey;
+    expect(detect("chatbot", "automated responses")).toBeNull();
+    expect(detect("ai tool", "data pipeline")).toBeNull();
+    expect(detect("chat system", "backend only no ui")).toBeNull();
+    delete process.env.ENABLE_AI_CHAT_TEMPLATE;
+  });
+
+  it("605 detectTemplateKey does NOT trigger ai-chat-saas when flag disabled", async () => {
+    delete process.env.ENABLE_AI_CHAT_TEMPLATE;
+    const mod = await import("../apps/web/lib/templates/index");
+    const detect = mod.detectTemplateKey;
+    expect(detect("build a chatgpt clone", "chat interface with sidebar")).toBeNull();
+  });
+
+  it("606 project-management-saas detection still works with ai-chat flag on", async () => {
+    process.env.ENABLE_AI_CHAT_TEMPLATE = "1";
+    const mod = await import("../apps/web/lib/templates/index");
+    expect(mod.detectTemplateKey("project management app", "tasks and collaboration")).toBe("project-management-saas");
+    expect(mod.detectTemplateKey("build me a todo tracker", "task board")).toBe("project-management-saas");
+    delete process.env.ENABLE_AI_CHAT_TEMPLATE;
+  });
+
+  it("607 unsupported complex prompts return null (fail fast)", async () => {
+    process.env.ENABLE_AI_CHAT_TEMPLATE = "1";
+    const mod = await import("../apps/web/lib/templates/index");
+    const detect = mod.detectTemplateKey;
+    expect(detect("build me an e-commerce marketplace", "shopping cart payment stripe")).toBeNull();
+    expect(detect("social media platform", "posts likes follows feed")).toBeNull();
+    expect(detect("CRM system", "contacts deals pipeline")).toBeNull();
+    expect(detect("weather dashboard", "forecasts maps alerts")).toBeNull();
+    delete process.env.ENABLE_AI_CHAT_TEMPLATE;
+  });
+
+  it("608 getTemplate always returns ai-chat-saas by key (for worker scaffold)", async () => {
+    const mod = await import("../apps/web/lib/templates/index");
+    const tpl = mod.getTemplate("ai-chat-saas");
+    expect(tpl).toBeTruthy();
+    expect(tpl!.key).toBe("ai-chat-saas");
+  });
+
+  it("609 isTemplateEnabled respects feature flag", async () => {
+    const mod = await import("../apps/web/lib/templates/index");
+    delete process.env.ENABLE_AI_CHAT_TEMPLATE;
+    expect(mod.isTemplateEnabled("ai-chat-saas")).toBe(false);
+    expect(mod.isTemplateEnabled("project-management-saas")).toBe(true);
+    process.env.ENABLE_AI_CHAT_TEMPLATE = "1";
+    expect(mod.isTemplateEnabled("ai-chat-saas")).toBe(true);
+    delete process.env.ENABLE_AI_CHAT_TEMPLATE;
+  });
+
+  it("610 ai-chat-saas package.json has correct build script", async () => {
+    const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
+    const pkg = aiChatSaasTemplate.getPackageJson();
+    expect((pkg.scripts as any).build).toContain("prisma generate");
+    expect((pkg.scripts as any).build).toContain("next build");
+    expect((pkg.dependencies as any)["@prisma/client"]).toBeTruthy();
+  });
+
+  it("611 ai-chat-saas prisma schema has Chat and Message models", async () => {
+    const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
+    const schema = aiChatSaasTemplate.getFiles().find(f => f.path === "prisma/schema.prisma");
+    expect(schema).toBeTruthy();
+    expect(schema!.content).toContain("model Chat");
+    expect(schema!.content).toContain("model Message");
+    expect(schema!.content).toContain("model User");
+    expect(schema!.content).toContain('role      String');
+    expect(schema!.content).toContain('content   String');
+  });
+});
