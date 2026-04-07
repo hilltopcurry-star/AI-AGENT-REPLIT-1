@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { detectTemplateKey, getTemplate } from "@/lib/templates";
 
 export type AgentMode = "Discuss" | "Plan" | "Build" | "Improve" | "Debug";
 
@@ -150,12 +151,28 @@ export async function processMessage(ctx: AgentContext): Promise<{
           shouldCreateJob: false,
         };
       }
-      const specJson = {
-        purpose: planUserMessages[1]?.content || "Not specified",
-        features: planUserMessages[2]?.content || "Not specified",
+      const purpose = planUserMessages[1]?.content || "Not specified";
+      const features = planUserMessages[2]?.content || "Not specified";
+      const allUserText = chatMessages.filter((m) => m.role === "user").map((m) => m.content).join(" ");
+      const combinedPurpose = `${purpose} ${allUserText}`;
+      const templateKey = detectTemplateKey(combinedPurpose, features);
+      const template = templateKey ? getTemplate(templateKey) : undefined;
+
+      const specJson: Record<string, unknown> = {
+        purpose,
+        features,
         techPreferences: planUserMessages[3]?.content || "Not specified",
         createdAt: new Date().toISOString(),
       };
+
+      if (templateKey && template) {
+        specJson.templateKey = templateKey;
+        specJson.requiredModules = template.requiredModules;
+        specJson.requiredRoutes = template.requiredRoutes;
+        specJson.requiredEntities = template.requiredEntities;
+        console.log(`[SPEC][mock] detected templateKey=${templateKey}`);
+      }
+
       return {
         response: `Perfect! Based on your answers, here's the project plan:\n\n${MOCK_PLAN}`,
         shouldCreateJob: false,
