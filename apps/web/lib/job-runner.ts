@@ -5,7 +5,7 @@ import * as path from "path";
 import { deployWorkspace } from "./deployer";
 import { requireAndDeductCredits, getCostDeploy, InsufficientCreditsError } from "./credits";
 import { runAcceptanceWithRetry, formatAcceptanceReport } from "./acceptance-checks";
-import { getTemplate } from "./templates";
+import { getTemplate, detectTemplateKey } from "./templates";
 import { getSpecLogLines, specHasComplexApp, MIN_FILES_FOR_COMPLEX_APP } from "./spec-logger";
 
 const WORKSPACES_ROOT = "/tmp/workspaces";
@@ -303,6 +303,38 @@ export async function runJob(jobId: string, projectId: string, userId?: string):
       } else {
         spec = project.specJson as Record<string, unknown>;
       }
+    }
+
+    if (spec && !spec.templateKey) {
+      await log(jobId, "INFO", "[SPEC] source=job-runner.templateDetection (templateKey missing, attempting detection)");
+      const chatMessages = await prisma.message.findMany({
+        where: { chat: { projectId } },
+        orderBy: { createdAt: "asc" },
+        select: { role: true, content: true },
+      });
+      const userPrompts = chatMessages.filter((m) => m.role === "user").map((m) => m.content).join(" ");
+      const purpose = (spec.purpose as string) || "";
+      const features = (spec.features as string) || "";
+      const combinedPurpose = userPrompts ? `${purpose} ${userPrompts}` : purpose;
+      await log(jobId, "INFO", `[SPEC] detectTemplateKey inputLen=${combinedPurpose.length + features.length} preview="${(combinedPurpose + " " + features).slice(0, 120)}"`);
+      const detectedKey = detectTemplateKey(combinedPurpose, features);
+      await log(jobId, "INFO", `[SPEC] detectTemplateKey result=${detectedKey || "none"}`);
+      if (detectedKey) {
+        const template = getTemplate(detectedKey);
+        if (template) {
+          spec.templateKey = detectedKey;
+          spec.requiredModules = template.requiredModules;
+          spec.requiredRoutes = template.requiredRoutes;
+          spec.requiredEntities = template.requiredEntities;
+          await prisma.project.update({
+            where: { id: projectId },
+            data: { specJson: spec as any },
+          });
+          await log(jobId, "INFO", `[SPEC] Applied templateKey=${detectedKey} with ${template.requiredRoutes.length} requiredRoutes`);
+        }
+      }
+    } else if (spec?.templateKey) {
+      await log(jobId, "INFO", `[SPEC] source=specJson.templateKey (pre-set: ${spec.templateKey})`);
     }
 
     const specLines = getSpecLogLines(spec);
