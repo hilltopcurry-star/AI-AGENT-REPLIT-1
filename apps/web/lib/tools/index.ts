@@ -17,7 +17,7 @@ export interface Tool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  run: (input: ToolInput, context: { userId: string; projectId: string }) => Promise<ToolResult>;
+  run: (input: ToolInput, context: { userId: string; projectId: string; chatMessages?: { role: string; content: string }[] }) => Promise<ToolResult>;
 }
 
 const saveProjectSpec: Tool = {
@@ -34,11 +34,24 @@ const saveProjectSpec: Tool = {
     },
     required: ["purpose", "features"],
   },
-  run: async (input, { projectId }) => {
+  run: async (input, { projectId, chatMessages }) => {
     const purpose = input.purpose as string;
     const features = input.features as string;
 
-    const templateKey = detectTemplateKey(purpose, features);
+    const userPrompts = (chatMessages || [])
+      .filter((m) => m.role === "user")
+      .map((m) => m.content)
+      .join(" ");
+
+    const combinedPurpose = userPrompts ? `${purpose} ${userPrompts}` : purpose;
+    const combinedFeatures = features;
+
+    console.log(`[SPEC] detectTemplateKey inputLen=${combinedPurpose.length + combinedFeatures.length} preview="${(combinedPurpose + " " + combinedFeatures).slice(0, 120)}"`);
+
+    const templateKey = detectTemplateKey(combinedPurpose, combinedFeatures);
+
+    console.log(`[SPEC] detectTemplateKey result=${templateKey || "none"}`);
+
     const template = templateKey ? getTemplate(templateKey) : undefined;
 
     const spec: Record<string, unknown> = {
@@ -126,7 +139,7 @@ export function getToolDefinitions() {
 export async function executeTool(
   name: string,
   args: ToolInput,
-  context: { userId: string; projectId: string }
+  context: { userId: string; projectId: string; chatMessages?: { role: string; content: string }[] }
 ): Promise<ToolResult> {
   const tool = tools.find((t) => t.name === name);
   if (!tool) {
