@@ -516,6 +516,137 @@ export async function POST(req: NextRequest, ctx: any) {
 `,
     },
     {
+      path: "app/projects/[projectId]/page.tsx",
+      content: `import { PrismaClient } from '@prisma/client';
+import { notFound } from 'next/navigation';
+
+const prisma = new PrismaClient();
+
+export const dynamic = 'force-dynamic';
+
+async function resolveParams(params: any): Promise<{ projectId: string }> {
+  const resolved = typeof params?.then === 'function' ? await params : params;
+  return resolved;
+}
+
+export default async function ProjectDetailPage({ params }: { params: any }) {
+  const { projectId } = await resolveParams(params);
+
+  let project: any = null;
+  let tasks: any[] = [];
+  try {
+    project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: { user: true },
+    });
+    if (!project) return notFound();
+    tasks = await prisma.task.findMany({
+      where: { projectId },
+      include: { _count: { select: { comments: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  } catch {
+    return notFound();
+  }
+
+  const statusColors: Record<string, string> = {
+    todo: 'badge-blue',
+    'in-progress': 'badge-yellow',
+    done: 'badge-green',
+    blocked: 'badge-red',
+  };
+
+  return (
+    <main style={{ padding: '2rem 0' }}>
+      <div style={{ marginBottom: '1rem' }}>
+        <a href="/projects" style={{ color: '#4f46e5', textDecoration: 'none', fontSize: '0.875rem' }}>&larr; Back to Projects</a>
+      </div>
+      <div className="card" style={{ marginBottom: '1.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <h1 style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: '0.5rem' }}>{project.name}</h1>
+            <p style={{ opacity: 0.7, marginBottom: '0.5rem' }}>{project.description || 'No description'}</p>
+            <p style={{ fontSize: '0.875rem', opacity: 0.5 }}>Created by {project.user?.name || project.user?.email || 'Unknown'}</p>
+          </div>
+          <span className={\`badge \${project.status === 'active' ? 'badge-green' : 'badge-yellow'}\`}>{project.status}</span>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Tasks ({tasks.length})</h2>
+      </div>
+
+      {tasks.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
+          <p style={{ opacity: 0.6 }}>No tasks yet for this project.</p>
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Task</th>
+                <th>Status</th>
+                <th>Priority</th>
+                <th>Comments</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((t: any) => (
+                <tr key={t.id}>
+                  <td>
+                    <strong>{t.title}</strong>
+                    {t.description && <p style={{ opacity: 0.6, fontSize: '0.75rem', margin: '0.25rem 0 0' }}>{t.description}</p>}
+                  </td>
+                  <td><span className={\`badge \${statusColors[t.status] || 'badge-blue'}\`}>{t.status}</span></td>
+                  <td style={{ opacity: 0.7 }}>{t.priority}</td>
+                  <td style={{ opacity: 0.7 }}>{t._count.comments}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </main>
+  );
+}
+`,
+    },
+    {
+      path: "app/api/projects/[projectId]/route.ts",
+      content: `import { NextRequest, NextResponse } from "next/server";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
+
+async function resolveProjectId(ctx: any): Promise<string> {
+  const p = ctx.params;
+  const resolved = typeof p?.then === "function" ? await p : p;
+  return resolved.projectId;
+}
+
+export async function GET(_req: NextRequest, ctx: any) {
+  try {
+    const projectId = await resolveProjectId(ctx);
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+        tasks: { include: { _count: { select: { comments: true } } }, orderBy: { createdAt: "desc" } },
+        _count: { select: { tasks: true } },
+      },
+    });
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    return NextResponse.json(project);
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+`,
+    },
+    {
       path: "app/api/tasks/[taskId]/comments/route.ts",
       content: `import { NextRequest, NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
@@ -687,8 +818,10 @@ export const projectManagementSaasTemplate: TemplateDefinition = {
     "/api/health",
     "/api/db-check",
     "/api/projects",
+    "/api/projects/[projectId]",
     "/api/projects/[projectId]/tasks",
     "/api/tasks/[taskId]/comments",
+    "/projects/[projectId]",
   ],
   requiredEntities: ["User", "Project", "Task", "Comment"],
   getFiles,
