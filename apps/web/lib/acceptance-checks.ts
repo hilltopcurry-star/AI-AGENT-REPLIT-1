@@ -208,7 +208,25 @@ async function checkCrud(baseUrl: string): Promise<CheckResult> {
       };
     }
 
-    return { name: "crud", passed: true, detail: "Created project + task via API" };
+    const detailRes = await httpGet(`${baseUrl}/projects/${projectId}`);
+    if (detailRes.status !== 200) {
+      return {
+        name: "crud",
+        passed: false,
+        detail: `GET /projects/${projectId} returned status=${detailRes.status} (expected 200 for project detail page)`,
+      };
+    }
+
+    const apiDetailRes = await httpGet(`${baseUrl}/api/projects/${projectId}`);
+    if (apiDetailRes.status !== 200) {
+      return {
+        name: "crud",
+        passed: false,
+        detail: `GET /api/projects/${projectId} returned status=${apiDetailRes.status} (expected 200 for project API detail)`,
+      };
+    }
+
+    return { name: "crud", passed: true, detail: "Created project + task via API, project detail page + API verified" };
   } catch (e: any) {
     return { name: "crud", passed: false, detail: `error: ${e.message}` };
   }
