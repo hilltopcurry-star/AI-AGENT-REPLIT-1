@@ -337,6 +337,8 @@ export function ChatPanel({ chatId, projectId, onJobCreated }: ChatPanelProps) {
       qc.invalidateQueries({ queryKey: ["/api/chats", chatId, "messages"] });
     } catch (err) {
       console.error("Send failed:", err);
+      qc.invalidateQueries({ queryKey: ["/api/ai/status"] });
+      qc.invalidateQueries({ queryKey: ["/api/ai/quota"] });
     } finally {
       setIsSending(false);
       setIsThinking(false);
