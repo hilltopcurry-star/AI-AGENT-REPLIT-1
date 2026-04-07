@@ -986,7 +986,44 @@ describe("AI Chat template (feature-flagged)", () => {
     delete process.env.ENABLE_AI_CHAT_TEMPLATE;
   });
 
-  it("614 ai-chat-saas prisma schema has Chat and Message models", async () => {
+  it("614 build-time fallback: detectTemplateKey applied when templateKey missing from specJson", async () => {
+    process.env.ENABLE_AI_CHAT_TEMPLATE = "1";
+    const { detectTemplateKey, getTemplate } = await import("../apps/web/lib/templates/index");
+
+    const spec: Record<string, unknown> = {
+      purpose: "An AI-powered conversation tool",
+      features: "message history, user auth",
+      generatedBy: "llm",
+    };
+
+    const chatMessages = [
+      { role: "user", content: "ChatGPT LLM chatbot web app with streaming sidebar dark mode" },
+      { role: "assistant", content: "Sure, let me plan that for you." },
+      { role: "user", content: "Yes build it" },
+    ];
+
+    expect(spec.templateKey).toBeUndefined();
+
+    const userPrompts = chatMessages.filter((m) => m.role === "user").map((m) => m.content).join(" ");
+    const combinedPurpose = `${spec.purpose} ${userPrompts}`;
+    const detectedKey = detectTemplateKey(combinedPurpose, spec.features as string);
+    expect(detectedKey).toBe("ai-chat-saas");
+
+    const template = getTemplate(detectedKey!);
+    expect(template).toBeTruthy();
+    spec.templateKey = detectedKey;
+    spec.requiredModules = template!.requiredModules;
+    spec.requiredRoutes = template!.requiredRoutes;
+    spec.requiredEntities = template!.requiredEntities;
+
+    expect(spec.templateKey).toBe("ai-chat-saas");
+    expect((spec.requiredRoutes as string[]).length).toBeGreaterThan(0);
+    expect((spec.requiredEntities as string[])).toContain("Chat");
+
+    delete process.env.ENABLE_AI_CHAT_TEMPLATE;
+  });
+
+  it("615 ai-chat-saas prisma schema has Chat and Message models", async () => {
     const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
     const schema = aiChatSaasTemplate.getFiles().find(f => f.path === "prisma/schema.prisma");
     expect(schema).toBeTruthy();
