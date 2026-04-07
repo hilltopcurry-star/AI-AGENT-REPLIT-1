@@ -2,7 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import * as fs from "fs";
 import * as path from "path";
 import { spawn, spawnSync, ChildProcess, execSync } from "child_process";
-import { getTemplate } from "../lib/templates";
+import { getTemplate, detectTemplateKey } from "../lib/templates";
 import { getSpecLogLines, specHasComplexApp, MIN_FILES_FOR_COMPLEX_APP } from "../lib/spec-logger";
 
 const prisma = new PrismaClient();
@@ -216,6 +216,38 @@ async function processQueueJob(queueJob: {
       } else {
         spec = project.specJson as Record<string, unknown>;
       }
+    }
+
+    if (spec && !spec.templateKey) {
+      await log(jobId, "INFO", "[SPEC] source=worker.templateDetection (templateKey missing, attempting detection)");
+      const chatMessages = await prisma.message.findMany({
+        where: { chat: { projectId } },
+        orderBy: { createdAt: "asc" },
+        select: { role: true, content: true },
+      });
+      const userPrompts = chatMessages.filter((m: any) => m.role === "user").map((m: any) => m.content).join(" ");
+      const purpose = (spec.purpose as string) || "";
+      const features = (spec.features as string) || "";
+      const combinedPurpose = userPrompts ? `${purpose} ${userPrompts}` : purpose;
+      await log(jobId, "INFO", `[SPEC] detectTemplateKey inputLen=${combinedPurpose.length + features.length} preview="${(combinedPurpose + " " + features).slice(0, 120)}"`);
+      const detectedKey = detectTemplateKey(combinedPurpose, features);
+      await log(jobId, "INFO", `[SPEC] detectTemplateKey result=${detectedKey || "none"}`);
+      if (detectedKey) {
+        const template = getTemplate(detectedKey);
+        if (template) {
+          spec.templateKey = detectedKey;
+          spec.requiredModules = template.requiredModules;
+          spec.requiredRoutes = template.requiredRoutes;
+          spec.requiredEntities = template.requiredEntities;
+          await prisma.project.update({
+            where: { id: projectId },
+            data: { specJson: spec as any },
+          });
+          await log(jobId, "INFO", `[SPEC] Applied templateKey=${detectedKey} with ${template.requiredRoutes.length} requiredRoutes`);
+        }
+      }
+    } else if (spec?.templateKey) {
+      await log(jobId, "INFO", `[SPEC] source=specJson.templateKey (pre-set: ${spec.templateKey})`);
     }
 
     const specLines = getSpecLogLines(spec);
