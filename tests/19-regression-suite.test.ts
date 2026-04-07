@@ -928,7 +928,17 @@ describe("AI Chat template (feature-flagged)", () => {
     expect((pkg.dependencies as any)["@prisma/client"]).toBeTruthy();
   });
 
-  it("611 ai-chat-saas prisma schema has Chat and Message models", async () => {
+  it("611 detectTemplateKey matches 'AI Chat Web App' prompt exactly", async () => {
+    process.env.ENABLE_AI_CHAT_TEMPLATE = "1";
+    const mod = await import("../apps/web/lib/templates/index");
+    const detect = mod.detectTemplateKey;
+    expect(detect("AI Chat Web App", "streaming dark mode sidebar chat interface")).toBe("ai-chat-saas");
+    expect(detect("AI Chat Web App", "chat ui with sidebar")).toBe("ai-chat-saas");
+    expect(detect("Build an AI Chat Web App", "real-time messaging with dark mode")).toBe("ai-chat-saas");
+    delete process.env.ENABLE_AI_CHAT_TEMPLATE;
+  });
+
+  it("612 ai-chat-saas prisma schema has Chat and Message models", async () => {
     const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
     const schema = aiChatSaasTemplate.getFiles().find(f => f.path === "prisma/schema.prisma");
     expect(schema).toBeTruthy();
