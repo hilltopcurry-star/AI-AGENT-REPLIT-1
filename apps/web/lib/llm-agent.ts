@@ -269,7 +269,7 @@ export async function processLlmMessage(input: AgentInput): Promise<AgentRespons
     let choice = result.choice;
 
     let specUpdate: Record<string, unknown> | undefined;
-    const toolContext = { userId, projectId };
+    const toolContext = { userId, projectId, chatMessages: chatMessages.map((m) => ({ role: m.role, content: m.content })) };
 
     let iterations = 0;
     while (choice.message.tool_calls && choice.message.tool_calls.length > 0 && iterations < 5) {
