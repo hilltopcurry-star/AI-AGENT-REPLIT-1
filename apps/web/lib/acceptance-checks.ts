@@ -39,7 +39,7 @@ function getAcceptanceHeaders(): Record<string, string> {
   return { "x-internal-acceptance-token": getAcceptanceToken() };
 }
 
-function httpGet(url: string, timeoutMs = 15000, extraHeaders?: Record<string, string>): Promise<{ status: number; body: string }> {
+function httpGet(url: string, timeoutMs = 30000, extraHeaders?: Record<string, string>): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const mod = parsed.protocol === "https:" ? https : http;
@@ -69,7 +69,7 @@ function httpGet(url: string, timeoutMs = 15000, extraHeaders?: Record<string, s
 async function httpPost(
   url: string,
   data: Record<string, unknown>,
-  timeoutMs = 15000
+  timeoutMs = 30000
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);

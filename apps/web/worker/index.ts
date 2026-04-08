@@ -388,8 +388,8 @@ async function processQueueJob(queueJob: {
         const { runAcceptanceWithRetry, formatAcceptanceReport } = await import("../lib/acceptance-checks");
         const isFlyUrl = deployUrl.includes(".fly.dev");
         if (isFlyUrl) {
-          await log(jobId, "INFO", `[ACCEPTANCE] Fly deployment detected — waiting 30s for machine boot...`);
-          await new Promise((r) => setTimeout(r, 30000));
+          await log(jobId, "INFO", `[ACCEPTANCE] Fly deployment detected — waiting 120s for machine boot + prisma db push...`);
+          await new Promise((r) => setTimeout(r, 120000));
         }
         await log(jobId, "INFO", `[ACCEPTANCE] Starting acceptance checks... templateKey=${tplKey || "none"}`);
         const acceptanceResult = await runAcceptanceWithRetry(deployUrl, jobId, tplKey);

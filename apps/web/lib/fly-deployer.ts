@@ -461,13 +461,12 @@ primary_region = "${region}"
   auto_stop_machines = "suspend"
   auto_start_machines = true
   min_machines_running = 1
-  [http_service.checks]
-    [http_service.checks.health]
-      interval = "10s"
-      timeout = "5s"
-      grace_period = "30s"
-      method = "GET"
-      path = "/api/health"
+  [[http_service.checks]]
+    interval = "10s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/api/health"
 
 [[vm]]
   memory = "512mb"
@@ -614,6 +613,7 @@ export async function createDockerContext(
         "COPY --from=builder /app/prisma ./prisma",
         "COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma",
         "COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma",
+        "COPY --from=builder /app/node_modules/prisma ./node_modules/prisma",
       ].join("\n")
     : "";
 
@@ -621,8 +621,8 @@ export async function createDockerContext(
 
   const startCmd = hasPrisma
     ? isSqlite
-      ? `CMD ["sh", "-c", "npx prisma db push --accept-data-loss 2>/dev/null || true; node server.js"]`
-      : `CMD ["sh", "-c", "npx prisma migrate deploy 2>/dev/null || npx prisma db push --accept-data-loss 2>/dev/null || true; node server.js"]`
+      ? `CMD ["sh", "-c", "node node_modules/prisma/build/index.js db push --accept-data-loss 2>/dev/null || true; node server.js"]`
+      : `CMD ["sh", "-c", "node node_modules/prisma/build/index.js migrate deploy 2>/dev/null || node node_modules/prisma/build/index.js db push --accept-data-loss 2>/dev/null || true; node server.js"]`
     : `CMD ["node", "server.js"]`;
 
   const dockerfile = `FROM node:20-alpine AS builder
@@ -785,6 +785,23 @@ export async function deployToFly(opts: {
   if (deployResult.success) {
     const flyUrl = `https://${appName}.fly.dev`;
     await logToJob(jobId, "SUCCESS", `[DEPLOY] Fly deployment succeeded!`);
+
+    try {
+      const scaleFlyctl = findFlyctlPath();
+      if (scaleFlyctl) {
+        await logToJob(jobId, "INFO", `[DEPLOY] Scaling to 1 machine (preventing HA dual-machine)...`);
+        await runFlyctl(scaleFlyctl, ["scale", "count", "1", "-a", appName, "--yes"], {
+          cwd: workspacePath,
+          timeoutMs: 30000,
+          jobId,
+          streamLogs: false,
+        });
+        await logToJob(jobId, "INFO", `[DEPLOY] Scaled to 1 machine`);
+      }
+    } catch (scaleErr: any) {
+      await logToJob(jobId, "WARN", `[DEPLOY] Scale to 1 machine failed (non-fatal): ${scaleErr.message}`);
+    }
+
     await logToJob(jobId, "INFO", `[DEPLOY] Fly URL (pending acceptance): ${flyUrl}`);
     await prisma.flyDeployment.update({
       where: { id: flyDeployment.id },
