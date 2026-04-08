@@ -85,18 +85,15 @@ export async function GET(
               );
             }
 
-            const logJob = await prisma.job.findUnique({ where: { id: jobId }, select: { projectId: true } });
-            const flyDep = logJob
-              ? await prisma.flyDeployment.findFirst({
-                  where: { projectId: logJob.projectId, status: "SUCCESS" },
-                  orderBy: { createdAt: "desc" },
-                  select: { id: true, url: true },
-                })
-              : null;
-
             const deployment = await prisma.deployment.findUnique({
               where: { jobId },
-              select: { id: true, url: true, status: true },
+              select: { id: true, url: true, status: true, provider: true },
+            });
+
+            const flyDep = await prisma.flyDeployment.findFirst({
+              where: { jobId, status: "SUCCESS" },
+              orderBy: { createdAt: "desc" },
+              select: { id: true, url: true },
             });
 
             const donePayload: Record<string, unknown> = {
@@ -105,16 +102,13 @@ export async function GET(
               status: currentJob.status,
             };
 
-            if (flyDep?.url) {
+            if (deployment?.provider === "fly" && flyDep?.url) {
               donePayload.deploymentUrl = flyDep.url;
               donePayload.deploymentProvider = "fly";
               donePayload.deploymentId = flyDep.id;
-              if (deployment?.status === "SUCCESS" && deployment.url) {
-                donePayload.proxyUrl = deployment.url;
-              }
             } else if (deployment?.status === "SUCCESS" && deployment.url) {
               donePayload.deploymentUrl = deployment.url;
-              donePayload.deploymentProvider = "replit-proxy";
+              donePayload.deploymentProvider = deployment.provider || "replit-proxy";
               donePayload.deploymentId = deployment.id;
             }
 

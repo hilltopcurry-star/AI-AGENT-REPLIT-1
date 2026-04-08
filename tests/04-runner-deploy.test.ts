@@ -123,11 +123,11 @@ describe("Deploy: deployment records and proxy", () => {
     expect(Array.isArray(r.body)).toBe(true);
   });
 
-  it("73 proxy route returns 401 without auth", async () => {
+  it("73 proxy route allows unauthenticated access to valid deployment", async () => {
     const d = await prisma.deployment.findFirst({ where: { status: "SUCCESS" } });
     if (!d) return;
     const r = await apiGet(`/api/deployments/${d.id}/proxy`);
-    expect(r.status).toBe(401);
+    expect([200, 503]).toContain(r.status);
   });
 
   it("74 debug endpoint returns 401 without auth", async () => {

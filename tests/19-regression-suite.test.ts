@@ -1023,7 +1023,42 @@ describe("AI Chat template (feature-flagged)", () => {
     delete process.env.ENABLE_AI_CHAT_TEMPLATE;
   });
 
-  it("615 ai-chat-saas prisma schema has Chat and Message models", async () => {
+  it("615 SSE job_done must scope fly URL to current job not project", async () => {
+    const fs = await import("fs");
+    const logsRoute = fs.readFileSync("apps/web/app/api/jobs/[jobId]/logs/route.ts", "utf-8");
+    const streamRoute = fs.readFileSync("apps/web/app/api/jobs/[jobId]/stream/route.ts", "utf-8");
+
+    expect(logsRoute).toContain("where: { jobId, status:");
+    expect(logsRoute).not.toContain("where: { projectId: logJob.projectId");
+    expect(logsRoute).not.toContain("where: { projectId: job.projectId");
+
+    expect(streamRoute).toContain("where: { jobId, status:");
+    expect(streamRoute).not.toContain("where: { projectId: logJob.projectId");
+    expect(streamRoute).not.toContain("where: { projectId: job.projectId");
+  });
+
+  it("616 SSE only shows fly URL when deployment provider is fly", async () => {
+    const fs = await import("fs");
+    const logsRoute = fs.readFileSync("apps/web/app/api/jobs/[jobId]/logs/route.ts", "utf-8");
+    const streamRoute = fs.readFileSync("apps/web/app/api/jobs/[jobId]/stream/route.ts", "utf-8");
+
+    expect(logsRoute).toContain('deployment?.provider === "fly"');
+    expect(streamRoute).toContain('deployment?.provider === "fly"');
+  });
+
+  it("617 proxy route allows public access to successful deployments", async () => {
+    const fs = await import("fs");
+    const proxyRoute = fs.readFileSync("apps/web/app/api/deployments/[deploymentId]/proxy/route.ts", "utf-8");
+    const proxyPathRoute = fs.readFileSync("apps/web/app/api/deployments/[deploymentId]/proxy/[...path]/route.ts", "utf-8");
+
+    expect(proxyRoute).not.toContain('return NextResponse.json({ error: "Unauthorized" }');
+    expect(proxyPathRoute).not.toContain('return NextResponse.json({ error: "Unauthorized" }');
+
+    expect(proxyRoute).toContain("userId && deployment.userId !== userId");
+    expect(proxyPathRoute).toContain("userId && deployment.userId !== userId");
+  });
+
+  it("618 ai-chat-saas prisma schema has Chat and Message models", async () => {
     const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
     const schema = aiChatSaasTemplate.getFiles().find(f => f.path === "prisma/schema.prisma");
     expect(schema).toBeTruthy();

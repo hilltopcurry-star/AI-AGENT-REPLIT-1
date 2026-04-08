@@ -104,18 +104,18 @@ describe("Deploy: Deployment model validation", () => {
 });
 
 describe("Deploy: proxy auth enforcement", () => {
-  it("187 proxy root without auth => 401", async () => {
+  it("187 proxy root without auth allows access", async () => {
     const d = await prisma.deployment.findFirst({ where: { status: "SUCCESS" } });
     if (!d) return;
     const r = await apiGet(`/api/deployments/${d.id}/proxy`);
-    expect(r.status).toBe(401);
+    expect([200, 503]).toContain(r.status);
   });
 
-  it("188 proxy subpath without auth => 401", async () => {
+  it("188 proxy subpath without auth allows access", async () => {
     const d = await prisma.deployment.findFirst({ where: { status: "SUCCESS" } });
     if (!d) return;
     const r = await apiGet(`/api/deployments/${d.id}/proxy/api/health`);
-    expect(r.status).toBe(401);
+    expect([200, 503]).toContain(r.status);
   });
 
   it("189 proxy with wrong user => 404", async () => {

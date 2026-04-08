@@ -35,31 +35,6 @@ async function proxyRoot(
   const internalToken = req.headers.get("x-internal-acceptance-token");
   const isInternalAcceptance = internalToken ? isValidAcceptanceToken(internalToken) : false;
 
-  let userId: string | null = null;
-
-  if (isInternalAcceptance) {
-    userId = "__acceptance__";
-  } else {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    userId = session.user.id;
-
-    const rl = await rateLimit({
-      userId,
-      key: "proxy_get",
-      windowSec: 60,
-      limit: getEnvLimit("PROXY_REQ_LIMIT_PER_MIN", 120),
-    });
-    if (!rl.ok) {
-      return NextResponse.json(
-        { error: "Rate limit exceeded", key: "proxy_get", resetAt: rl.resetAt.toISOString(), limit: rl.limit },
-        { status: 429 }
-      );
-    }
-  }
-
   const { deploymentId } = await params;
 
   opportunisticCleanup().catch(() => {});
@@ -72,8 +47,32 @@ async function proxyRoot(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  if (!isInternalAcceptance && deployment.userId !== userId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  let userId: string | null = null;
+
+  if (isInternalAcceptance) {
+    userId = "__acceptance__";
+  } else {
+    const session = await auth();
+    userId = session?.user?.id || null;
+
+    if (userId && deployment.userId !== userId) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    if (userId) {
+      const rl = await rateLimit({
+        userId,
+        key: "proxy_get",
+        windowSec: 60,
+        limit: getEnvLimit("PROXY_REQ_LIMIT_PER_MIN", 120),
+      });
+      if (!rl.ok) {
+        return NextResponse.json(
+          { error: "Rate limit exceeded", key: "proxy_get", resetAt: rl.resetAt.toISOString(), limit: rl.limit },
+          { status: 429 }
+        );
+      }
+    }
   }
 
   if (deployment.status !== "SUCCESS") {
