@@ -461,23 +461,25 @@ primary_region = "${region}"
   auto_stop_machines = "suspend"
   auto_start_machines = true
   min_machines_running = 1
-  [[http_service.checks]]
-    interval = "10s"
-    timeout = "5s"
-    grace_period = "30s"
-    method = "GET"
-    path = "/api/health"
+
+[[http_service.checks]]
+  interval = "10s"
+  timeout = "5s"
+  grace_period = "30s"
+  method = "GET"
+  path = "/api/health"
 
 [[vm]]
   memory = "512mb"
   cpu_kind = "shared"
   cpus = 1
-  count = 1
 `;
       fs.writeFileSync(path.join(workspacePath, "fly.toml"), flyToml, "utf-8");
+      return flyToml;
     };
 
-    writeFlyToml();
+    const generatedToml = writeFlyToml();
+    await logToJob(jobId, "INFO", `[DEPLOY] fly.toml http_service section:\n${generatedToml.split("[http_service]")[1]?.split("[[vm]]")[0] || "(parse failed)"}`);
 
     const SECRET_KEYS = ["ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "OPENAI_API_KEY"];
     const secretsToSet: Record<string, string> = {};
