@@ -117,6 +117,11 @@ function spawnNextStart(workspacePath: string, port: number, logFn?: (msg: strin
     }
   }
 
+  const passthrough: Record<string, string> = {};
+  for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "OPENAI_API_KEY"]) {
+    if (process.env[key] && !workspaceEnv[key]) passthrough[key] = process.env[key]!;
+  }
+
   const safeEnv: NodeJS.ProcessEnv = {
     PATH: systemPath || "/usr/local/bin:/usr/bin:/bin",
     HOME: workspacePath,
@@ -125,6 +130,7 @@ function spawnNextStart(workspacePath: string, port: number, logFn?: (msg: strin
     HOSTNAME: "0.0.0.0",
     XDG_CONFIG_HOME: path.join(workspacePath, ".config"),
     TMPDIR: workspacePath,
+    ...passthrough,
     ...workspaceEnv,
   };
 

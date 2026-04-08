@@ -1058,7 +1058,7 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(proxyPathRoute).toContain("userId && deployment.userId !== userId");
   });
 
-  it("618 ai-chat-saas prisma schema has Chat and Message models", async () => {
+  it("618 ai-chat-saas prisma schema has Chat and Message models with imageUrl", async () => {
     const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
     const schema = aiChatSaasTemplate.getFiles().find(f => f.path === "prisma/schema.prisma");
     expect(schema).toBeTruthy();
@@ -1067,5 +1067,67 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(schema!.content).toContain("model User");
     expect(schema!.content).toContain('role      String');
     expect(schema!.content).toContain('content   String');
+    expect(schema!.content).toContain('imageUrl  String?');
+  });
+
+  it("619 ai-chat-saas uses Anthropic Claude streaming, no demo reply", async () => {
+    const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
+    const messagesRoute = aiChatSaasTemplate.getFiles().find(f => f.path === "app/api/chats/[chatId]/messages/route.ts");
+    expect(messagesRoute).toBeTruthy();
+    const content = messagesRoute!.content;
+    expect(content).toContain("ANTHROPIC_API_KEY");
+    expect(content).toContain("api.anthropic.com");
+    expect(content).toContain("text/event-stream");
+    expect(content).toContain("claude-3-5-sonnet-latest");
+    expect(content).toContain("content_block_delta");
+    expect(content).not.toContain("generateAIReply");
+    expect(content).not.toContain("I'm a demo AI assistant");
+  });
+
+  it("620 ai-chat-saas has /api/ai-status route", async () => {
+    const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
+    const aiStatus = aiChatSaasTemplate.getFiles().find(f => f.path === "app/api/ai-status/route.ts");
+    expect(aiStatus).toBeTruthy();
+    expect(aiStatus!.content).toContain("ANTHROPIC_API_KEY");
+    expect(aiStatus!.content).toContain("configured");
+    expect(aiChatSaasTemplate.requiredRoutes).toContain("/api/ai-status");
+  });
+
+  it("621 ai-chat-saas frontend handles streaming and image upload", async () => {
+    const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
+    const page = aiChatSaasTemplate.getFiles().find(f => f.path === "app/page.tsx");
+    expect(page).toBeTruthy();
+    const content = page!.content;
+    expect(content).toContain("streamingText");
+    expect(content).toContain("text/event-stream");
+    expect(content).toContain('type="file"');
+    expect(content).toContain("image/*");
+    expect(content).toContain("ANTHROPIC_API_KEY");
+    expect(content).toContain("banner-warning");
+  });
+
+  it("622 ai-chat-saas returns 400 when ANTHROPIC_API_KEY missing (no fake response)", async () => {
+    const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
+    const messagesRoute = aiChatSaasTemplate.getFiles().find(f => f.path === "app/api/chats/[chatId]/messages/route.ts");
+    expect(messagesRoute).toBeTruthy();
+    const content = messagesRoute!.content;
+    expect(content).toContain('"AI not configured');
+    expect(content).toContain("status: 400");
+  });
+
+  it("623 acceptance checks reject demo placeholder responses", async () => {
+    const fs = await import("fs");
+    const acceptance = fs.readFileSync("apps/web/lib/acceptance-checks.ts", "utf-8");
+    expect(acceptance).toContain("DEMO_PATTERNS");
+    expect(acceptance).toContain("demo ai assistant");
+    expect(acceptance).toContain("text/event-stream");
+    expect(acceptance).toContain("httpPostStream");
+  });
+
+  it("624 deployer passes through ANTHROPIC_API_KEY to deployed apps", async () => {
+    const fs = await import("fs");
+    const deployer = fs.readFileSync("apps/web/lib/deployer.ts", "utf-8");
+    expect(deployer).toContain("ANTHROPIC_API_KEY");
+    expect(deployer).toContain("passthrough");
   });
 });

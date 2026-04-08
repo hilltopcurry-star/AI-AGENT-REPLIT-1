@@ -200,6 +200,54 @@ async function checkChatHomepage(baseUrl: string, templateKey: string): Promise<
   }
 }
 
+function httpPostStream(
+  url: string,
+  data: Record<string, unknown>,
+  timeoutMs = 30000
+): Promise<{ status: number; contentType: string; body: string }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const mod = parsed.protocol === "https:" ? https : http;
+    const payload = JSON.stringify(data);
+    const extraHeaders: Record<string, string> = {};
+    if (isProxyUrl(url)) {
+      Object.assign(extraHeaders, getAcceptanceHeaders());
+    }
+    const opts = {
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
+      path: parsed.pathname + parsed.search,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+        ...extraHeaders,
+      },
+      timeout: timeoutMs,
+    };
+    const req = mod.request(opts, (res) => {
+      let body = "";
+      res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      res.on("end", () => resolve({
+        status: res.statusCode || 0,
+        contentType: res.headers["content-type"] || "",
+        body,
+      }));
+    });
+    req.on("error", (e) => reject(e));
+    req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+    req.write(payload);
+    req.end();
+  });
+}
+
+const DEMO_PATTERNS = [
+  "i'm a demo ai assistant",
+  "demo ai assistant",
+  "this would connect to an ai model",
+  "connect to an ai model like gpt",
+];
+
 async function checkChatCrud(baseUrl: string): Promise<CheckResult> {
   try {
     const chatRes = await httpPost(`${baseUrl}/api/chats`, { title: "Smoke Test Chat" });
@@ -211,9 +259,56 @@ async function checkChatCrud(baseUrl: string): Promise<CheckResult> {
       return { name: "chatCrud", passed: false, detail: "Could not parse chat response" };
     }
 
-    const msgRes = await httpPost(`${baseUrl}/api/chats/${chatId}/messages`, { content: "Hello test" });
-    if (msgRes.status !== 201 && msgRes.status !== 200) {
-      return { name: "chatCrud", passed: false, detail: `POST messages failed: status=${msgRes.status}` };
+    const msgRes = await httpPostStream(
+      `${baseUrl}/api/chats/${chatId}/messages`,
+      { content: "Say hello in exactly one sentence." }
+    );
+
+    if (msgRes.status === 400) {
+      const errBody = JSON.parse(msgRes.body).error || "";
+      if (errBody.toLowerCase().includes("not configured") || errBody.toLowerCase().includes("anthropic_api_key")) {
+        return { name: "chatCrud", passed: false, detail: "AI not configured: ANTHROPIC_API_KEY not set in deployed environment" };
+      }
+      return { name: "chatCrud", passed: false, detail: `POST messages returned 400: ${errBody.slice(0, 200)}` };
+    }
+
+    if (msgRes.status !== 200 && msgRes.status !== 201) {
+      return { name: "chatCrud", passed: false, detail: `POST messages failed: status=${msgRes.status} body=${msgRes.body.slice(0, 200)}` };
+    }
+
+    const isStreaming = msgRes.contentType.includes("text/event-stream");
+
+    let responseText = "";
+    if (isStreaming) {
+      const lines = msgRes.body.split("\n");
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const parsed = JSON.parse(line.slice(6));
+          if (parsed.type === "token" && parsed.text) {
+            responseText += parsed.text;
+          }
+        } catch {}
+      }
+    } else {
+      try {
+        const parsed = JSON.parse(msgRes.body);
+        if (parsed.messages) {
+          const assistantMsg = parsed.messages.find((m: any) => m.role === "assistant");
+          responseText = assistantMsg?.content || "";
+        }
+      } catch {}
+    }
+
+    const lowerResponse = responseText.toLowerCase();
+    for (const pattern of DEMO_PATTERNS) {
+      if (lowerResponse.includes(pattern)) {
+        return { name: "chatCrud", passed: false, detail: `Response contains demo placeholder text: "${pattern}"` };
+      }
+    }
+
+    if (!responseText || responseText.length < 2) {
+      return { name: "chatCrud", passed: false, detail: `AI response was empty or too short (${responseText.length} chars)` };
     }
 
     const detailRes = await httpGet(`${baseUrl}/api/chats/${chatId}`);
@@ -221,7 +316,8 @@ async function checkChatCrud(baseUrl: string): Promise<CheckResult> {
       return { name: "chatCrud", passed: false, detail: `GET /api/chats/${chatId} returned status=${detailRes.status}` };
     }
 
-    return { name: "chatCrud", passed: true, detail: "Created chat + message, detail API verified" };
+    const streamNote = isStreaming ? " (streamed)" : " (non-streamed)";
+    return { name: "chatCrud", passed: true, detail: `Created chat, sent message, received ${responseText.length}-char Claude reply${streamNote}, detail API verified` };
   } catch (e: any) {
     return { name: "chatCrud", passed: false, detail: `error: ${e.message}` };
   }

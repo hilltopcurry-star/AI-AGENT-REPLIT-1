@@ -37,6 +37,7 @@ model Message {
   id        String   @id @default(cuid())
   role      String
   content   String
+  imageUrl  String?
   chatId    String
   chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
@@ -155,6 +156,13 @@ body {
 }
 .send-btn:hover { background: #4338ca; }
 .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.attach-btn {
+  background: transparent; color: #b0b0c0; border: 1px solid #2a2a3e;
+  border-radius: 10px; width: 40px; height: 40px; display: flex;
+  align-items: center; justify-content: center; cursor: pointer;
+  flex-shrink: 0; font-size: 1.125rem;
+}
+.attach-btn:hover { background: #2a2a3e; color: #e8e8f0; }
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0.5rem 1rem; border-radius: 8px; border: none;
@@ -168,6 +176,21 @@ body {
   display: flex; flex-direction: column; align-items: center;
   justify-content: center; height: 100%; opacity: 0.5; text-align: center;
 }
+.banner-warning {
+  background: #7c2d12; color: #fed7aa; padding: 0.75rem 1rem;
+  text-align: center; font-size: 0.875rem; border-bottom: 1px solid #9a3412;
+}
+.image-preview {
+  max-width: 200px; max-height: 150px; border-radius: 8px;
+  margin-top: 0.5rem; border: 1px solid #2a2a3e;
+}
+.image-attachment {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0;
+  font-size: 0.8125rem; color: #b0b0c0;
+}
+.image-attachment button {
+  background: none; border: none; color: #ef4444; cursor: pointer; font-size: 0.75rem;
+}
 `,
     },
     {
@@ -176,7 +199,7 @@ body {
 
 export const metadata = {
   title: 'AI Chat',
-  description: 'Chat with AI - your intelligent assistant',
+  description: 'Chat with AI powered by Claude - your intelligent assistant',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -186,7 +209,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="ai-workspace-template" content="ai-chat-saas" />
       </head>
       <body>
-        <div style={{ display: 'flex', height: '100vh' }}>
+        <div style={{ display: 'flex', height: '100vh', flexDirection: 'column' }}>
           {children}
         </div>
       </body>
@@ -202,7 +225,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 import { useState, useEffect, useRef } from 'react';
 
 interface ChatSummary { id: string; title: string; updatedAt: string; }
-interface Message { id: string; role: string; content: string; }
+interface Message { id: string; role: string; content: string; imageUrl?: string | null; }
 
 export default function ChatApp() {
   const [chats, setChats] = useState<ChatSummary[]>([]);
@@ -210,9 +233,21 @@ export default function ChatApp() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [streamingText, setStreamingText] = useState('');
+  const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
+  const [aiModel, setAiModel] = useState('');
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { fetchChats(); }, []);
+  useEffect(() => {
+    fetchChats();
+    fetch('/api/ai-status').then(r => r.json()).then(data => {
+      setAiConfigured(data.configured);
+      setAiModel(data.model || '');
+    }).catch(() => setAiConfigured(false));
+  }, []);
 
   useEffect(() => {
     if (activeChatId) fetchMessages(activeChatId);
@@ -221,7 +256,7 @@ export default function ChatApp() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, streamingText]);
 
   async function fetchChats() {
     try {
@@ -252,9 +287,25 @@ export default function ChatApp() {
     } catch {}
   }
 
+  function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return;
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setImagePreview(reader.result as string);
+    reader.readAsDataURL(file);
+  }
+
+  function clearImage() {
+    setImageFile(null);
+    setImagePreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
-    if (!input.trim() || loading) return;
+    if ((!input.trim() && !imageFile) || loading) return;
 
     let chatId = activeChatId;
     if (!chatId) {
@@ -262,7 +313,7 @@ export default function ChatApp() {
         const res = await fetch('/api/chats', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: input.slice(0, 50) }),
+          body: JSON.stringify({ title: (input || 'Image chat').slice(0, 50) }),
         });
         if (res.ok) {
           const chat = await res.json();
@@ -273,19 +324,73 @@ export default function ChatApp() {
       } catch { return; }
     }
 
-    const userMsg: Message = { id: 'temp-' + Date.now(), role: 'user', content: input };
+    const userContent = input.trim() || (imageFile ? '[Image sent]' : '');
+    const userMsg: Message = {
+      id: 'temp-' + Date.now(),
+      role: 'user',
+      content: userContent,
+      imageUrl: imagePreview,
+    };
     setMessages(prev => [...prev, userMsg]);
     const userInput = input;
+    const currentImage = imagePreview;
     setInput('');
+    clearImage();
     setLoading(true);
+    setStreamingText('');
 
     try {
+      const body: Record<string, string> = { content: userInput };
+      if (currentImage) body.image = currentImage;
+
       const res = await fetch(\`/api/chats/\${chatId}/messages\`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: userInput }),
+        body: JSON.stringify(body),
       });
-      if (res.ok) {
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Request failed' }));
+        setStreamingText('');
+        setMessages(prev => [...prev, {
+          id: 'err-' + Date.now(),
+          role: 'assistant',
+          content: 'Error: ' + (err.error || 'Something went wrong'),
+        }]);
+        setLoading(false);
+        return;
+      }
+
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('text/event-stream')) {
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const parsed = JSON.parse(line.slice(6));
+              if (parsed.type === 'token') {
+                fullText += parsed.text;
+                setStreamingText(fullText);
+              } else if (parsed.type === 'error') {
+                fullText += '\\n[Error: ' + parsed.error + ']';
+                setStreamingText(fullText);
+              }
+            } catch {}
+          }
+        }
+        setStreamingText('');
+        await fetchMessages(chatId!);
+        fetchChats();
+      } else {
         const data = await res.json();
         setMessages(data.messages || []);
         fetchChats();
@@ -296,59 +401,103 @@ export default function ChatApp() {
 
   return (
     <>
-      <div className="sidebar">
-        <div className="sidebar-header">
-          <span style={{ fontWeight: 700 }}>AI Chat</span>
-          <button className="btn btn-primary btn-sm" onClick={createChat}>+ New</button>
+      {aiConfigured === false && (
+        <div className="banner-warning">
+          ANTHROPIC_API_KEY is not set. AI responses are disabled.
+          Set the environment variable to enable Claude-powered chat.
         </div>
-        <div className="sidebar-chats">
-          {chats.map(c => (
-            <a key={c.id} href={\`/chat/\${c.id}\`}
-              className={\`chat-item \${activeChatId === c.id ? 'active' : ''}\`}
-              onClick={(e) => { e.preventDefault(); setActiveChatId(c.id); }}>
-              {c.title}
-            </a>
-          ))}
-        </div>
-      </div>
-      <div className="main-area">
-        {messages.length === 0 && !activeChatId ? (
-          <div className="empty-state">
-            <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>How can I help you today?</h2>
-            <p>Start a conversation by typing a message below.</p>
+      )}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <div className="sidebar">
+          <div className="sidebar-header">
+            <span style={{ fontWeight: 700 }}>AI Chat</span>
+            <button className="btn btn-primary btn-sm" onClick={createChat} data-testid="button-new-chat">+ New</button>
           </div>
-        ) : (
-          <div className="messages-container">
-            {messages.map(m => (
-              <div key={m.id} className="message">
-                <div className={\`message-avatar \${m.role}\`}>
-                  {m.role === 'user' ? 'U' : 'AI'}
-                </div>
-                <div className="message-content">
-                  <p>{m.content}</p>
-                </div>
-              </div>
+          {aiModel && (
+            <div style={{ padding: '0.25rem 1rem', fontSize: '0.75rem', color: '#6b7280' }}>
+              Model: {aiModel}
+            </div>
+          )}
+          <div className="sidebar-chats">
+            {chats.map(c => (
+              <a key={c.id} href={\`/chat/\${c.id}\`}
+                className={\`chat-item \${activeChatId === c.id ? 'active' : ''}\`}
+                onClick={(e) => { e.preventDefault(); setActiveChatId(c.id); }}>
+                {c.title}
+              </a>
             ))}
-            {loading && (
-              <div className="message">
-                <div className="message-avatar assistant">AI</div>
-                <div className="message-content"><p style={{ opacity: 0.5 }}>Thinking...</p></div>
+          </div>
+        </div>
+        <div className="main-area">
+          {messages.length === 0 && !activeChatId ? (
+            <div className="empty-state">
+              <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>How can I help you today?</h2>
+              <p>Start a conversation by typing a message below.</p>
+            </div>
+          ) : (
+            <div className="messages-container">
+              {messages.map(m => (
+                <div key={m.id} className="message">
+                  <div className={\`message-avatar \${m.role}\`}>
+                    {m.role === 'user' ? 'U' : 'AI'}
+                  </div>
+                  <div className="message-content">
+                    {m.imageUrl && (
+                      <img src={m.imageUrl} alt="attachment" className="image-preview" />
+                    )}
+                    <p style={{ whiteSpace: 'pre-wrap' }}>{m.content}</p>
+                  </div>
+                </div>
+              ))}
+              {(loading || streamingText) && (
+                <div className="message">
+                  <div className="message-avatar assistant">AI</div>
+                  <div className="message-content">
+                    <p style={{ whiteSpace: 'pre-wrap' }}>
+                      {streamingText || 'Thinking...'}
+                    </p>
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+          <div className="input-area">
+            {imagePreview && (
+              <div className="image-attachment">
+                <img src={imagePreview} alt="preview" style={{ width: 40, height: 40, borderRadius: 4, objectFit: 'cover' }} />
+                <span>{imageFile?.name}</span>
+                <button onClick={clearImage}>&times; Remove</button>
               </div>
             )}
-            <div ref={messagesEndRef} />
+            <form onSubmit={sendMessage} className="input-wrapper">
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={handleImageSelect}
+              />
+              <button
+                type="button"
+                className="attach-btn"
+                onClick={() => fileInputRef.current?.click()}
+                title="Attach image"
+                data-testid="button-attach-image"
+              >
+                &#128206;
+              </button>
+              <textarea
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(e); } }}
+                placeholder="Type your message..."
+                rows={1}
+                data-testid="input-message"
+              />
+              <button type="submit" className="send-btn" disabled={loading || (!input.trim() && !imageFile)} data-testid="button-send">&#x27A4;</button>
+            </form>
           </div>
-        )}
-        <div className="input-area">
-          <form onSubmit={sendMessage} className="input-wrapper">
-            <textarea
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(e); } }}
-              placeholder="Type your message..."
-              rows={1}
-            />
-            <button type="submit" className="send-btn" disabled={loading || !input.trim()}>&#x27A4;</button>
-          </form>
         </div>
       </div>
     </>
@@ -379,6 +528,20 @@ export default async function ChatDetailPage({ params }: { params: any }) {
 
 export async function GET() {
   return NextResponse.json({ ok: true });
+}
+`,
+    },
+    {
+      path: "app/api/ai-status/route.ts",
+      content: `import { NextResponse } from "next/server";
+
+export async function GET() {
+  const configured = !!process.env.ANTHROPIC_API_KEY;
+  return NextResponse.json({
+    configured,
+    model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest",
+    provider: "anthropic",
+  });
 }
 `,
     },
@@ -509,9 +672,18 @@ export async function GET(_req: NextRequest, ctx: any) {
 export async function POST(req: NextRequest, ctx: any) {
   try {
     const chatId = await resolveChatId(ctx);
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "AI not configured. Set ANTHROPIC_API_KEY environment variable." },
+        { status: 400 }
+      );
+    }
+
     const body = await req.json();
-    const { content } = body;
-    if (!content || typeof content !== "string") {
+    const { content, image } = body;
+    if ((!content || typeof content !== "string") && !image) {
       return NextResponse.json({ error: "content is required" }, { status: 400 });
     }
 
@@ -520,51 +692,171 @@ export async function POST(req: NextRequest, ctx: any) {
       return NextResponse.json({ error: "Chat not found" }, { status: 404 });
     }
 
-    await prisma.message.create({
-      data: { role: "user", content, chatId },
-    });
+    let imageBase64: string | null = null;
+    let imageMimeType: string | null = null;
+    let imageMetadata: string | null = null;
 
-    const aiReply = generateAIReply(content);
-
-    await prisma.message.create({
-      data: { role: "assistant", content: aiReply, chatId },
-    });
-
-    if (chat.title === "New Chat") {
-      await prisma.chat.update({
-        where: { id: chatId },
-        data: { title: content.slice(0, 50) },
-      });
-    } else {
-      await prisma.chat.update({
-        where: { id: chatId },
-        data: { updatedAt: new Date() },
-      });
+    if (image && typeof image === "string") {
+      const match = image.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        imageMimeType = match[1];
+        imageBase64 = match[2];
+        imageMetadata = JSON.stringify({ type: imageMimeType, size: imageBase64.length });
+      }
     }
 
-    const messages = await prisma.message.findMany({
+    const msgContent = content || "[Image sent]";
+    await prisma.message.create({
+      data: {
+        role: "user",
+        content: msgContent,
+        imageUrl: imageMetadata,
+        chatId,
+      },
+    });
+
+    const history = await prisma.message.findMany({
       where: { chatId },
       orderBy: { createdAt: "asc" },
     });
-    return NextResponse.json({ messages }, { status: 201 });
+
+    const MAX_HISTORY = 50;
+    const recentHistory = history.length > MAX_HISTORY
+      ? history.slice(history.length - MAX_HISTORY)
+      : history;
+
+    const claudeMessages: Array<{ role: "user" | "assistant"; content: any }> = [];
+    for (const m of recentHistory) {
+      if (m.role === "assistant") {
+        claudeMessages.push({ role: "assistant", content: m.content });
+      } else {
+        claudeMessages.push({ role: "user", content: m.content });
+      }
+    }
+
+    if (imageBase64 && imageMimeType) {
+      const lastIdx = claudeMessages.length - 1;
+      if (lastIdx >= 0 && claudeMessages[lastIdx].role === "user") {
+        const supportedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+        if (supportedTypes.includes(imageMimeType)) {
+          claudeMessages[lastIdx] = {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: imageMimeType,
+                  data: imageBase64,
+                },
+              },
+              { type: "text", text: msgContent },
+            ],
+          };
+        }
+      }
+    }
+
+    const model = process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest";
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": apiKey,
+              "anthropic-version": "2023-06-01",
+            },
+            body: JSON.stringify({
+              model,
+              max_tokens: 4096,
+              messages: claudeMessages,
+              stream: true,
+            }),
+          });
+
+          if (!anthropicRes.ok) {
+            const errBody = await anthropicRes.text();
+            controller.enqueue(
+              encoder.encode(\`data: \${JSON.stringify({ type: "error", error: "Anthropic API error: " + anthropicRes.status + " " + errBody.slice(0, 200) })}\\n\\n\`)
+            );
+            controller.close();
+            return;
+          }
+
+          const reader = anthropicRes.body!.getReader();
+          const decoder = new TextDecoder();
+          let fullResponse = "";
+          let buf = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split("\\n");
+            buf = lines.pop() || "";
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              const payload = line.slice(6).trim();
+              if (payload === "[DONE]") continue;
+              try {
+                const parsed = JSON.parse(payload);
+                if (parsed.type === "content_block_delta" && parsed.delta?.text) {
+                  fullResponse += parsed.delta.text;
+                  controller.enqueue(
+                    encoder.encode(\`data: \${JSON.stringify({ type: "token", text: parsed.delta.text })}\\n\\n\`)
+                  );
+                }
+              } catch {}
+            }
+          }
+
+          if (fullResponse) {
+            await prisma.message.create({
+              data: { role: "assistant", content: fullResponse, chatId },
+            });
+          }
+
+          if (chat.title === "New Chat" && recentHistory.length <= 1) {
+            await prisma.chat.update({
+              where: { id: chatId },
+              data: { title: (content || "Image chat").slice(0, 50) },
+            });
+          } else {
+            await prisma.chat.update({
+              where: { id: chatId },
+              data: { updatedAt: new Date() },
+            });
+          }
+
+          controller.enqueue(
+            encoder.encode(\`data: \${JSON.stringify({ type: "done" })}\\n\\n\`)
+          );
+          controller.close();
+        } catch (e: any) {
+          console.error("[MESSAGES STREAM]", e);
+          controller.enqueue(
+            encoder.encode(\`data: \${JSON.stringify({ type: "error", error: e.message })}\\n\\n\`)
+          );
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
   } catch (e: any) {
     console.error("[MESSAGES POST]", e);
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
-}
-
-function generateAIReply(userMessage: string): string {
-  const lower = userMessage.toLowerCase();
-  if (lower.includes("hello") || lower.includes("hi")) {
-    return "Hello! I'm your AI assistant. How can I help you today?";
-  }
-  if (lower.includes("help")) {
-    return "I'm here to help! You can ask me questions, request explanations, get coding help, brainstorm ideas, or just have a conversation. What would you like to do?";
-  }
-  if (lower.includes("code") || lower.includes("programming")) {
-    return "I'd be happy to help with coding! Please share the specific problem or question you have, and I'll do my best to assist you with a solution.";
-  }
-  return \`Thank you for your message. You said: "\${userMessage.slice(0, 100)}". I'm a demo AI assistant — in a production app, this would connect to an AI model like GPT-4 or Claude for intelligent responses.\`;
 }
 `,
     },
@@ -589,7 +881,7 @@ async function main() {
   });
 
   await prisma.message.create({
-    data: { role: "assistant", content: "Hello! I'm your AI assistant. How can I help you today?", chatId: chat.id },
+    data: { role: "assistant", content: "Hello! I'm your AI assistant powered by Claude. How can I help you today?", chatId: chat.id },
   });
 
   console.log("Seed data created successfully!");
@@ -640,7 +932,7 @@ export const aiChatSaasTemplate: TemplateDefinition = {
   key: "ai-chat-saas",
   name: "AI Chat Application",
   description:
-    "A ChatGPT-style AI chat interface with conversation history, message threads, and a sidebar",
+    "A ChatGPT-style AI chat interface powered by Claude with streaming, conversation history, image upload, and a sidebar",
   keywords: [
     "ai chat",
     "ai chat app",
@@ -684,6 +976,7 @@ export const aiChatSaasTemplate: TemplateDefinition = {
   requiredModules: ["next", "react", "@prisma/client", "prisma"],
   requiredRoutes: [
     "/api/health",
+    "/api/ai-status",
     "/api/db-check",
     "/api/chats",
     "/api/chats/[chatId]",
