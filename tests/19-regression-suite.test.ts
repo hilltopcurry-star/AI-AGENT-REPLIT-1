@@ -1134,4 +1134,38 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(deployer).toContain("ANTHROPIC_API_KEY");
     expect(deployer).toContain("passthrough");
   });
+
+  it("625 ai-chat-saas ChatApp has onPaste handler for clipboard image upload", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("onPaste={handlePaste}");
+    expect(template).toContain("clipboardData");
+    expect(template).toContain("getAsFile");
+    expect(template).toContain("e.preventDefault()");
+  });
+
+  it("626 ai-chat-saas ChatApp has onDrop handler for drag-and-drop image upload", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("onDrop={handleDrop}");
+    expect(template).toContain("onDragOver={handleDragOver}");
+    expect(template).toContain("e.dataTransfer");
+  });
+
+  it("627 ai-chat-saas ChatApp shows image upload hint text", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("input-hint");
+    expect(template).toContain("Paste (Ctrl+V), drag-drop, or click");
+    expect(template).toContain("data-testid=\"text-input-hint\"");
+  });
+
+  it("628 ai-chat-saas attachImage function shared by file picker, paste, and drop", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("function attachImage(file: File)");
+    const attachCalls = template.match(/attachImage\(file\)/g);
+    expect(attachCalls).toBeTruthy();
+    expect(attachCalls!.length).toBeGreaterThanOrEqual(3);
+  });
 });

@@ -192,6 +192,10 @@ body {
 .image-attachment button {
   background: none; border: none; color: #ef4444; cursor: pointer; font-size: 0.75rem;
 }
+.input-hint {
+  font-size: 0.6875rem; color: #6b7280; text-align: center;
+  padding: 0.25rem 0 0; user-select: none;
+}
 `,
     },
     {
@@ -354,14 +358,42 @@ export default function ChatApp() {
     } catch {}
   }
 
-  function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  function attachImage(file: File) {
     if (!file.type.startsWith('image/')) return;
     setImageFile(file);
     const reader = new FileReader();
     reader.onload = () => setImagePreview(reader.result as string);
     reader.readAsDataURL(file);
+  }
+
+  function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) attachImage(file);
+  }
+
+  function handlePaste(e: React.ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        e.preventDefault();
+        const file = items[i].getAsFile();
+        if (file) attachImage(file);
+        return;
+      }
+    }
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const file = e.dataTransfer?.files?.[0];
+    if (file && file.type.startsWith('image/')) attachImage(file);
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
   }
 
   function clearImage() {
@@ -529,12 +561,12 @@ export default function ChatApp() {
               <div ref={messagesEndRef} />
             </div>
           )}
-          <div className="input-area">
+          <div className="input-area" onDrop={handleDrop} onDragOver={handleDragOver} data-testid="drop-zone">
             {imagePreview && (
               <div className="image-attachment">
                 <img src={imagePreview} alt="preview" style={{ width: 40, height: 40, borderRadius: 4, objectFit: 'cover' }} />
-                <span>{imageFile?.name}</span>
-                <button onClick={clearImage}>&times; Remove</button>
+                <span>{imageFile?.name || 'Pasted image'}</span>
+                <button onClick={clearImage} data-testid="button-remove-image">&times; Remove</button>
               </div>
             )}
             <form onSubmit={sendMessage} className="input-wrapper">
@@ -558,12 +590,14 @@ export default function ChatApp() {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(e); } }}
+                onPaste={handlePaste}
                 placeholder="Type your message..."
                 rows={1}
                 data-testid="input-message"
               />
               <button type="submit" className="send-btn" disabled={loading || (!input.trim() && !imageFile)} data-testid="button-send">&#x27A4;</button>
             </form>
+            <div className="input-hint" data-testid="text-input-hint">Paste (Ctrl+V), drag-drop, or click &#128206; to upload images.</div>
           </div>
         </div>
       </div>
