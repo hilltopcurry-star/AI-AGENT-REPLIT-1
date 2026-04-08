@@ -469,6 +469,24 @@ primary_region = "${region}"
 
     writeFlyToml();
 
+    const secretsToSet: Record<string, string> = {};
+    for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "OPENAI_API_KEY"]) {
+      if (process.env[key]) secretsToSet[key] = process.env[key]!;
+    }
+    if (Object.keys(secretsToSet).length > 0) {
+      const secretArgs = Object.entries(secretsToSet).map(([k, v]) => `${k}=${v}`);
+      await logToJob(jobId, "INFO", `[DEPLOY] Setting ${Object.keys(secretsToSet).length} fly secret(s): ${Object.keys(secretsToSet).join(", ")}`);
+      const secretResult = await runFlyctl(flyctl, ["secrets", "set", ...secretArgs, "--stage"], {
+        cwd: workspacePath,
+        timeoutMs: 30000,
+        logPrefix: "[flyctl-secrets]",
+        jobId,
+      });
+      if (secretResult.exitCode !== 0) {
+        await logToJob(jobId, "WARN", `[DEPLOY] flyctl secrets set failed (exit ${secretResult.exitCode}), continuing deploy...`);
+      }
+    }
+
     const maxAttempts = 3;
     let registryFailCount = 0;
 
