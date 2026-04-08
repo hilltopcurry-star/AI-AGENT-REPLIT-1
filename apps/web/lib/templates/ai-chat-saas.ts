@@ -758,11 +758,21 @@ export async function POST(req: NextRequest, ctx: any) {
     }
 
     const model = process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest";
+    const keyPreview = apiKey.slice(0, 10) + "..." + apiKey.slice(-4);
+    console.log("[AI-CHAT] Starting Claude request: model=" + model + " key=" + keyPreview + " messages=" + claudeMessages.length);
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          const reqBody = {
+            model,
+            max_tokens: 4096,
+            messages: claudeMessages,
+            stream: true,
+          };
+          console.log("[AI-CHAT] Sending to Anthropic API...");
+
           const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: {
@@ -770,18 +780,17 @@ export async function POST(req: NextRequest, ctx: any) {
               "x-api-key": apiKey,
               "anthropic-version": "2023-06-01",
             },
-            body: JSON.stringify({
-              model,
-              max_tokens: 4096,
-              messages: claudeMessages,
-              stream: true,
-            }),
+            body: JSON.stringify(reqBody),
           });
+
+          console.log("[AI-CHAT] Anthropic response status: " + anthropicRes.status);
 
           if (!anthropicRes.ok) {
             const errBody = await anthropicRes.text();
+            const errMsg = "Anthropic API error: " + anthropicRes.status + " " + errBody.slice(0, 300);
+            console.error("[AI-CHAT] " + errMsg);
             controller.enqueue(
-              encoder.encode(\`data: \${JSON.stringify({ type: "error", error: "Anthropic API error: " + anthropicRes.status + " " + errBody.slice(0, 200) })}\\n\\n\`)
+              encoder.encode(\`data: \${JSON.stringify({ type: "error", error: errMsg })}\\n\\n\`)
             );
             controller.close();
             return;
@@ -791,6 +800,7 @@ export async function POST(req: NextRequest, ctx: any) {
           const decoder = new TextDecoder();
           let fullResponse = "";
           let buf = "";
+          let tokenCount = 0;
 
           while (true) {
             const { done, value } = await reader.read();
@@ -806,6 +816,7 @@ export async function POST(req: NextRequest, ctx: any) {
                 const parsed = JSON.parse(payload);
                 if (parsed.type === "content_block_delta" && parsed.delta?.text) {
                   fullResponse += parsed.delta.text;
+                  tokenCount++;
                   controller.enqueue(
                     encoder.encode(\`data: \${JSON.stringify({ type: "token", text: parsed.delta.text })}\\n\\n\`)
                   );
@@ -814,10 +825,14 @@ export async function POST(req: NextRequest, ctx: any) {
             }
           }
 
+          console.log("[AI-CHAT] Stream complete: " + tokenCount + " tokens, " + fullResponse.length + " chars");
+
           if (fullResponse) {
             await prisma.message.create({
               data: { role: "assistant", content: fullResponse, chatId },
             });
+          } else {
+            console.warn("[AI-CHAT] WARNING: Claude returned empty response");
           }
 
           if (chat.title === "New Chat" && recentHistory.length <= 1) {
@@ -837,7 +852,7 @@ export async function POST(req: NextRequest, ctx: any) {
           );
           controller.close();
         } catch (e: any) {
-          console.error("[MESSAGES STREAM]", e);
+          console.error("[AI-CHAT] Stream error:", e.message, e.stack);
           controller.enqueue(
             encoder.encode(\`data: \${JSON.stringify({ type: "error", error: e.message })}\\n\\n\`)
           );

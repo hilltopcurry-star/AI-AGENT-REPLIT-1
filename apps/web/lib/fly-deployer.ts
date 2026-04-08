@@ -476,7 +476,7 @@ primary_region = "${region}"
     if (Object.keys(secretsToSet).length > 0) {
       const secretArgs = Object.entries(secretsToSet).map(([k, v]) => `${k}=${v}`);
       await logToJob(jobId, "INFO", `[DEPLOY] Setting ${Object.keys(secretsToSet).length} fly secret(s): ${Object.keys(secretsToSet).join(", ")}`);
-      const secretResult = await runFlyctl(flyctl, ["secrets", "set", ...secretArgs, "--stage"], {
+      const secretResult = await runFlyctl(flyctl, ["secrets", "set", ...secretArgs], {
         cwd: workspacePath,
         timeoutMs: 30000,
         logPrefix: "[flyctl-secrets]",

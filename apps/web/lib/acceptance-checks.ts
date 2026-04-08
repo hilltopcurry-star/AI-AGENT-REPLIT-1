@@ -248,6 +248,22 @@ const DEMO_PATTERNS = [
   "connect to an ai model like gpt",
 ];
 
+async function checkAiStatus(baseUrl: string): Promise<CheckResult> {
+  try {
+    const { status, body } = await httpGet(`${baseUrl}/api/ai-status`);
+    if (status !== 200) {
+      return { name: "aiStatus", passed: false, detail: `GET /api/ai-status returned status=${status}` };
+    }
+    const parsed = JSON.parse(body);
+    if (!parsed.configured) {
+      return { name: "aiStatus", passed: false, detail: `ANTHROPIC_API_KEY not set in deployed app (provider=${parsed.provider}, model=${parsed.model})` };
+    }
+    return { name: "aiStatus", passed: true, detail: `AI configured: provider=${parsed.provider} model=${parsed.model}` };
+  } catch (e: any) {
+    return { name: "aiStatus", passed: false, detail: `error: ${e.message}` };
+  }
+}
+
 async function checkChatCrud(baseUrl: string): Promise<CheckResult> {
   try {
     const chatRes = await httpPost(`${baseUrl}/api/chats`, { title: "Smoke Test Chat" });
@@ -279,6 +295,7 @@ async function checkChatCrud(baseUrl: string): Promise<CheckResult> {
     const isStreaming = msgRes.contentType.includes("text/event-stream");
 
     let responseText = "";
+    let errorText = "";
     if (isStreaming) {
       const lines = msgRes.body.split("\n");
       for (const line of lines) {
@@ -287,6 +304,8 @@ async function checkChatCrud(baseUrl: string): Promise<CheckResult> {
           const parsed = JSON.parse(line.slice(6));
           if (parsed.type === "token" && parsed.text) {
             responseText += parsed.text;
+          } else if (parsed.type === "error" && parsed.error) {
+            errorText = parsed.error;
           }
         } catch {}
       }
@@ -297,7 +316,14 @@ async function checkChatCrud(baseUrl: string): Promise<CheckResult> {
           const assistantMsg = parsed.messages.find((m: any) => m.role === "assistant");
           responseText = assistantMsg?.content || "";
         }
+        if (parsed.error) {
+          errorText = parsed.error;
+        }
       } catch {}
+    }
+
+    if (errorText) {
+      return { name: "chatCrud", passed: false, detail: `Claude API error: ${errorText.slice(0, 300)}` };
     }
 
     const lowerResponse = responseText.toLowerCase();
@@ -308,7 +334,12 @@ async function checkChatCrud(baseUrl: string): Promise<CheckResult> {
     }
 
     if (!responseText || responseText.length < 2) {
-      return { name: "chatCrud", passed: false, detail: `AI response was empty or too short (${responseText.length} chars)` };
+      const bodyPreview = msgRes.body.slice(0, 300).replace(/\n/g, "\\n");
+      return {
+        name: "chatCrud",
+        passed: false,
+        detail: `AI response was empty or too short (${responseText.length} chars). status=${msgRes.status} contentType=${msgRes.contentType} bodyPreview=${bodyPreview}`,
+      };
     }
 
     const detailRes = await httpGet(`${baseUrl}/api/chats/${chatId}`);
@@ -413,13 +444,18 @@ export async function runAcceptanceChecks(
     await logJob(jobId, dbResult.passed ? "SUCCESS" : "ERROR",
       `[ACCEPTANCE] db-check ${dbResult.passed ? "OK" : "FAIL"}: ${dbResult.detail}`);
 
+    const aiStatusResult = await checkAiStatus(effectiveUrl);
+    checks.push(aiStatusResult);
+    await logJob(jobId, aiStatusResult.passed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] aiStatus ${aiStatusResult.passed ? "OK" : "FAIL"}: ${aiStatusResult.detail}`);
+
     const chatCrudResult = await checkChatCrud(effectiveUrl);
     checks.push(chatCrudResult);
     await logJob(jobId, chatCrudResult.passed ? "SUCCESS" : "ERROR",
       `[ACCEPTANCE] chatCrud ${chatCrudResult.passed ? "OK" : "FAIL"}: ${chatCrudResult.detail}`);
 
-    const summary = `chatHomepage:${chatHomeResult.passed ? "OK" : "FAIL"} dbCheck:${dbResult.passed ? "OK" : "FAIL"} chatCrud:${chatCrudResult.passed ? "OK" : "FAIL"}`;
-    const allPassed = chatHomeResult.passed && dbResult.passed && chatCrudResult.passed;
+    const summary = `chatHomepage:${chatHomeResult.passed ? "OK" : "FAIL"} dbCheck:${dbResult.passed ? "OK" : "FAIL"} aiStatus:${aiStatusResult.passed ? "OK" : "FAIL"} chatCrud:${chatCrudResult.passed ? "OK" : "FAIL"}`;
+    const allPassed = chatHomeResult.passed && dbResult.passed && aiStatusResult.passed && chatCrudResult.passed;
     await logJob(jobId, allPassed ? "SUCCESS" : "ERROR",
       `[ACCEPTANCE] result=${allPassed ? "PASS" : "FAIL"} checks=${summary}`);
   } else if (templateKey) {
