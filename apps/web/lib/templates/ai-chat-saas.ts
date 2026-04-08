@@ -48,6 +48,7 @@ model Message {
       content: `/** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  reactStrictMode: false,
 };
 module.exports = nextConfig;
 `,
@@ -194,6 +195,43 @@ body {
 `,
     },
     {
+      path: "pages/_error.tsx",
+      content: `function ErrorPage({ statusCode }: { statusCode?: number }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column' }}>
+      <h1>{statusCode || 'Error'}</h1>
+      <p>{statusCode === 404 ? 'Page not found' : 'An error occurred'}</p>
+    </div>
+  );
+}
+
+ErrorPage.getInitialProps = ({ res, err }: any) => {
+  const statusCode = res ? res.statusCode : err ? err.statusCode : 404;
+  return { statusCode };
+};
+
+export default ErrorPage;
+`,
+    },
+    {
+      path: "app/global-error.tsx",
+      content: `'use client';
+
+export default function GlobalError({ error, reset }: { error: Error; reset: () => void }) {
+  return (
+    <html>
+      <body>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column' }}>
+          <h1>Something went wrong</h1>
+          <button onClick={reset}>Try Again</button>
+        </div>
+      </body>
+    </html>
+  );
+}
+`,
+    },
+    {
       path: "app/layout.tsx",
       content: `import './globals.css';
 
@@ -219,7 +257,36 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 `,
     },
     {
-      path: "app/page.tsx",
+      path: "app/not-found.tsx",
+      content: `export default function NotFound() {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column' }}>
+      <h1 style={{ fontSize: '2rem', marginBottom: '1rem' }}>404 - Page Not Found</h1>
+      <a href="/" style={{ color: '#3b82f6' }}>Go to Chat</a>
+    </div>
+  );
+}
+`,
+    },
+    {
+      path: "app/error.tsx",
+      content: `'use client';
+
+export default function Error({ error, reset }: { error: Error; reset: () => void }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column' }}>
+      <h1 style={{ fontSize: '2rem', marginBottom: '1rem' }}>Something went wrong</h1>
+      <p style={{ color: '#666', marginBottom: '1rem' }}>{error.message}</p>
+      <button onClick={reset} style={{ padding: '8px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+        Try Again
+      </button>
+    </div>
+  );
+}
+`,
+    },
+    {
+      path: "app/ChatApp.tsx",
       content: `'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -506,6 +573,17 @@ export default function ChatApp() {
 `,
     },
     {
+      path: "app/page.tsx",
+      content: `import dynamic from 'next/dynamic';
+
+const ChatApp = dynamic(() => import('./ChatApp'), { ssr: false });
+
+export default function Page() {
+  return <ChatApp />;
+}
+`,
+    },
+    {
       path: "app/chat/[chatId]/page.tsx",
       content: `import { redirect } from 'next/navigation';
 
@@ -535,12 +613,31 @@ export async function GET() {
       path: "app/api/ai-status/route.ts",
       content: `import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const configured = !!process.env.ANTHROPIC_API_KEY;
   return NextResponse.json({
     configured,
-    model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest",
+    model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
     provider: "anthropic",
+  });
+}
+`,
+    },
+    {
+      path: "app/api/debug/env/route.ts",
+      content: `import { NextResponse } from "next/server";
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  const key = process.env.ANTHROPIC_API_KEY || "";
+  return NextResponse.json({
+    ANTHROPIC_API_KEY: key ? { present: true, length: key.length, prefix: key.slice(0, 7) + "..." } : { present: false },
+    ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL || "(default: claude-sonnet-4-20250514)",
+    NODE_ENV: process.env.NODE_ENV || "unknown",
+    DATABASE_URL: process.env.DATABASE_URL ? { present: true } : { present: false },
   });
 }
 `,
@@ -549,6 +646,8 @@ export async function GET() {
       path: "app/api/db-check/route.ts",
       content: `import { NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
+
+export const dynamic = "force-dynamic";
 
 const prisma = new PrismaClient();
 
@@ -566,6 +665,8 @@ export async function GET() {
       path: "app/api/chats/route.ts",
       content: `import { NextRequest, NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
+
+export const dynamic = "force-dynamic";
 
 const prisma = new PrismaClient();
 
@@ -608,6 +709,8 @@ export async function POST(req: NextRequest) {
       content: `import { NextRequest, NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
 
+export const dynamic = "force-dynamic";
+
 const prisma = new PrismaClient();
 
 async function resolveChatId(ctx: any): Promise<string> {
@@ -647,6 +750,8 @@ export async function DELETE(_req: NextRequest, ctx: any) {
       path: "app/api/chats/[chatId]/messages/route.ts",
       content: `import { NextRequest, NextResponse } from "next/server";
 import { PrismaClient } from "@prisma/client";
+
+export const dynamic = "force-dynamic";
 
 const prisma = new PrismaClient();
 
@@ -757,7 +862,7 @@ export async function POST(req: NextRequest, ctx: any) {
       }
     }
 
-    const model = process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-latest";
+    const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
     const keyPreview = apiKey.slice(0, 10) + "..." + apiKey.slice(-4);
     console.log("[AI-CHAT] Starting Claude request: model=" + model + " key=" + keyPreview + " messages=" + claudeMessages.length);
 
@@ -992,6 +1097,7 @@ export const aiChatSaasTemplate: TemplateDefinition = {
   requiredRoutes: [
     "/api/health",
     "/api/ai-status",
+    "/api/debug/env",
     "/api/db-check",
     "/api/chats",
     "/api/chats/[chatId]",

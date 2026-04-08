@@ -1078,7 +1078,7 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(content).toContain("ANTHROPIC_API_KEY");
     expect(content).toContain("api.anthropic.com");
     expect(content).toContain("text/event-stream");
-    expect(content).toContain("claude-3-5-sonnet-latest");
+    expect(content).toContain("claude-sonnet-4-20250514");
     expect(content).toContain("content_block_delta");
     expect(content).not.toContain("generateAIReply");
     expect(content).not.toContain("I'm a demo AI assistant");
@@ -1095,15 +1095,19 @@ describe("AI Chat template (feature-flagged)", () => {
 
   it("621 ai-chat-saas frontend handles streaming and image upload", async () => {
     const { aiChatSaasTemplate } = await import("../apps/web/lib/templates/ai-chat-saas");
-    const page = aiChatSaasTemplate.getFiles().find(f => f.path === "app/page.tsx");
-    expect(page).toBeTruthy();
-    const content = page!.content;
+    const chatApp = aiChatSaasTemplate.getFiles().find(f => f.path === "app/ChatApp.tsx");
+    expect(chatApp).toBeTruthy();
+    const content = chatApp!.content;
     expect(content).toContain("streamingText");
     expect(content).toContain("text/event-stream");
     expect(content).toContain('type="file"');
     expect(content).toContain("image/*");
     expect(content).toContain("ANTHROPIC_API_KEY");
     expect(content).toContain("banner-warning");
+    const page = aiChatSaasTemplate.getFiles().find(f => f.path === "app/page.tsx");
+    expect(page).toBeTruthy();
+    expect(page!.content).toContain("ChatApp");
+    expect(page!.content).toContain("ssr: false");
   });
 
   it("622 ai-chat-saas returns 400 when ANTHROPIC_API_KEY missing (no fake response)", async () => {

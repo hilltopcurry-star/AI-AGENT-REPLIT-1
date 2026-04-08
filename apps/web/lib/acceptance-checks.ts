@@ -497,11 +497,11 @@ export async function runAcceptanceWithRetry(
     await logJob(jobId, "INFO", `[ACCEPTANCE] Attempt ${attempt}/${maxAttempts}`);
 
     if (attempt === 2) {
-      await logJob(jobId, "INFO", "[ACCEPTANCE] Waiting 15s before retry...");
-      await new Promise((r) => setTimeout(r, 15000));
+      await logJob(jobId, "INFO", "[ACCEPTANCE] Waiting 20s before retry...");
+      await new Promise((r) => setTimeout(r, 20000));
     } else if (attempt > 2) {
-      await logJob(jobId, "INFO", "[ACCEPTANCE] Waiting 30s before retry...");
-      await new Promise((r) => setTimeout(r, 30000));
+      await logJob(jobId, "INFO", "[ACCEPTANCE] Waiting 40s before retry...");
+      await new Promise((r) => setTimeout(r, 40000));
     }
 
     lastChecks = await runAcceptanceChecks(baseUrl, jobId, templateKey);

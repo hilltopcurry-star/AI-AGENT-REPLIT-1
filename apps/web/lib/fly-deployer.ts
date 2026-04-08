@@ -452,39 +452,73 @@ primary_region = "${region}"
 
 [build]
 
+[deploy]
+  strategy = "immediate"
+
 [http_service]
   internal_port = 3000
   force_https = true
   auto_stop_machines = "suspend"
   auto_start_machines = true
   min_machines_running = 1
+  [http_service.checks]
+    [http_service.checks.health]
+      interval = "10s"
+      timeout = "5s"
+      grace_period = "30s"
+      method = "GET"
+      path = "/api/health"
 
 [[vm]]
   memory = "512mb"
   cpu_kind = "shared"
   cpus = 1
+  count = 1
 `;
       fs.writeFileSync(path.join(workspacePath, "fly.toml"), flyToml, "utf-8");
     };
 
     writeFlyToml();
 
+    const SECRET_KEYS = ["ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "OPENAI_API_KEY"];
     const secretsToSet: Record<string, string> = {};
-    for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "OPENAI_API_KEY"]) {
-      if (process.env[key]) secretsToSet[key] = process.env[key]!;
+    for (const key of SECRET_KEYS) {
+      const val = process.env[key];
+      if (val) {
+        secretsToSet[key] = val;
+        await logToJob(jobId, "INFO", `[DEPLOY] fly secrets set: ${key} present=true length=${val.length}`);
+      } else {
+        await logToJob(jobId, "INFO", `[DEPLOY] fly secrets set: ${key} present=false (not in worker env)`);
+      }
     }
     if (Object.keys(secretsToSet).length > 0) {
       const secretArgs = Object.entries(secretsToSet).map(([k, v]) => `${k}=${v}`);
-      await logToJob(jobId, "INFO", `[DEPLOY] Setting ${Object.keys(secretsToSet).length} fly secret(s): ${Object.keys(secretsToSet).join(", ")}`);
-      const secretResult = await runFlyctl(flyctl, ["secrets", "set", ...secretArgs], {
+      await logToJob(jobId, "INFO", `[DEPLOY] Setting ${Object.keys(secretsToSet).length} fly secret(s) with --stage: ${Object.keys(secretsToSet).join(", ")}`);
+      const secretResult = await runFlyctl(flyctl, ["secrets", "set", "--stage", ...secretArgs], {
         cwd: workspacePath,
         timeoutMs: 30000,
         logPrefix: "[flyctl-secrets]",
         jobId,
       });
       if (secretResult.exitCode !== 0) {
-        await logToJob(jobId, "WARN", `[DEPLOY] flyctl secrets set failed (exit ${secretResult.exitCode}), continuing deploy...`);
+        await logToJob(jobId, "WARN", `[DEPLOY] flyctl secrets set --stage failed (exit ${secretResult.exitCode}): ${secretResult.lastLines.slice(-2).join(" ").substring(0, 300)}`);
+        await logToJob(jobId, "INFO", `[DEPLOY] Retrying secrets set without --stage...`);
+        const retryResult = await runFlyctl(flyctl, ["secrets", "set", "--detach", ...secretArgs], {
+          cwd: workspacePath,
+          timeoutMs: 30000,
+          logPrefix: "[flyctl-secrets-retry]",
+          jobId,
+        });
+        if (retryResult.exitCode !== 0) {
+          await logToJob(jobId, "WARN", `[DEPLOY] flyctl secrets set --detach also failed (exit ${retryResult.exitCode}), continuing deploy...`);
+        } else {
+          await logToJob(jobId, "INFO", `[DEPLOY] flyctl secrets set --detach succeeded`);
+        }
+      } else {
+        await logToJob(jobId, "INFO", `[DEPLOY] flyctl secrets staged successfully for next deploy`);
       }
+    } else {
+      await logToJob(jobId, "WARN", `[DEPLOY] No API secrets found in worker environment`);
     }
 
     const maxAttempts = 3;

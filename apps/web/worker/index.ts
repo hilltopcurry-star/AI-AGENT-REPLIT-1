@@ -55,10 +55,11 @@ function runCommand(
   return new Promise((resolve) => {
     const systemPath = process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
 
+    const isBuildStep = args.includes("build");
     const safeEnv: NodeJS.ProcessEnv = {
       PATH: systemPath,
       HOME: cwd,
-      NODE_ENV: "development",
+      NODE_ENV: isBuildStep ? "production" : "development",
       NPM_CONFIG_PRODUCTION: "false",
       npm_config_production: "false",
       npm_config_cache: path.join(cwd, ".npm-cache"),
@@ -300,7 +301,7 @@ async function processQueueJob(queueJob: {
     await log(jobId, "SUCCESS", "[WORKER] Step 1/2: npm install completed");
 
     await log(jobId, "INFO", "[WORKER] Step 2/2: npm run build...");
-    await log(jobId, "INFO", `[WORKER] Build env: NODE_ENV=development NPM_CONFIG_PRODUCTION=false UV_THREADPOOL_SIZE=1 NEXT_BUILD_WORKER_COUNT=1 NODE_OPTIONS=--max-old-space-size=1536 CI=1`);
+    await log(jobId, "INFO", `[WORKER] Build env: NODE_ENV=production NPM_CONFIG_PRODUCTION=false UV_THREADPOOL_SIZE=1 NEXT_BUILD_WORKER_COUNT=1 NODE_OPTIONS=--max-old-space-size=1536 CI=1`);
     await log(jobId, "INFO", `[WORKER] Build env PATH=${process.env.PATH}`);
     const buildResult = await runCommand(
       "npm", ["run", "build"], workspaceDir, BUILD_TIMEOUT,
@@ -385,6 +386,11 @@ async function processQueueJob(queueJob: {
     if (deploySuccess && deployUrl) {
       try {
         const { runAcceptanceWithRetry, formatAcceptanceReport } = await import("../lib/acceptance-checks");
+        const isFlyUrl = deployUrl.includes(".fly.dev");
+        if (isFlyUrl) {
+          await log(jobId, "INFO", `[ACCEPTANCE] Fly deployment detected — waiting 30s for machine boot...`);
+          await new Promise((r) => setTimeout(r, 30000));
+        }
         await log(jobId, "INFO", `[ACCEPTANCE] Starting acceptance checks... templateKey=${tplKey || "none"}`);
         const acceptanceResult = await runAcceptanceWithRetry(deployUrl, jobId, tplKey);
         const report = formatAcceptanceReport(acceptanceResult);
