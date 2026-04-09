@@ -1151,7 +1151,7 @@ export async function POST(req: NextRequest, ctx: any) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          let systemPrompt = "You are a helpful AI assistant.";
+          let systemPrompt = "You are a helpful AI assistant. COPY INSTRUCTIONS: Every message in this chat has a one-click Copy button. When you provide text the user should copy (code, prompts, commands, instructions for forwarding), say 'Use the Copy button on this message.' NEVER suggest manual selection methods like click-drag, Ctrl+C, Cmd+C, or 'select and copy'. Keep responses concise and action-focused.";
           if (hasLargeDocument) {
             systemPrompt += " The user has uploaded a large document. RETRIEVAL RULES: 1) Use ONLY the retrieved context sections to answer — do NOT fabricate content that is not in the provided sections. 2) If the retrieved sections do not contain enough information to fully answer, explicitly say 'The retrieved context does not cover this topic — please ask me to look at a specific section or rephrase your question.' 3) When quoting from the document, cite the section number (e.g., [Section 3]). 4) Always end your response with a '## Next Steps' section listing 2-4 actionable suggestions. 5) NEVER bluff or make up document content.";
           }

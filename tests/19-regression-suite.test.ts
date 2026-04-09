@@ -1379,7 +1379,15 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(template).toContain("textarea");
   });
 
-  it("653 ai-chat-saas clipboard logic is SSR-safe with browser guard", async () => {
+  it("653 ai-chat-saas system prompt directs to Copy button, no manual copy instructions", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("Use the Copy button on this message");
+    expect(template).toContain("NEVER suggest manual selection methods");
+    expect(template).toContain("click-drag, Ctrl+C, Cmd+C");
+  });
+
+  it("654 ai-chat-saas clipboard logic is SSR-safe with browser guard", async () => {
     const fs = await import("fs");
     const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
     expect(template).toContain("typeof window !== 'undefined'");
