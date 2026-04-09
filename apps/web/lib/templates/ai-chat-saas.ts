@@ -402,11 +402,11 @@ export default function ChatApp() {
     if (file) attachImage(file);
   }
 
-  const LARGE_PASTE_THRESHOLD = 50000;
+  const LARGE_PASTE_THRESHOLD = 200000;
 
   async function uploadLargeText(text: string, chatId: string) {
     setUploadProgress('Initializing upload...');
-    const CHUNK_SIZE = 100000;
+    const CHUNK_SIZE = 512000;
     try {
       const initRes = await fetch('/api/uploads/init', {
         method: 'POST',
@@ -1200,7 +1200,7 @@ export async function POST(req: NextRequest) {
     if (!totalSize || totalSize < 1) {
       return NextResponse.json({ error: "totalSize is required" }, { status: 400 });
     }
-    const effectiveChunkSize = chunkSize || 100000;
+    const effectiveChunkSize = chunkSize || 512000;
     const totalChunks = Math.ceil(totalSize / effectiveChunkSize);
 
     const upload = await prisma.upload.create({

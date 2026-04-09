@@ -1229,10 +1229,11 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(template).toContain("isStillIndexing");
   });
 
-  it("636 ai-chat-saas UI detects large paste and auto-uploads via chunks", async () => {
+  it("636 ai-chat-saas UI detects large paste (>200k) and auto-uploads via 512k chunks", async () => {
     const fs = await import("fs");
     const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
-    expect(template).toContain("LARGE_PASTE_THRESHOLD");
+    expect(template).toContain("LARGE_PASTE_THRESHOLD = 200000");
+    expect(template).toContain("CHUNK_SIZE = 512000");
     expect(template).toContain("uploadLargeText");
     expect(template).toContain("__pendingLargeText");
     expect(template).toContain("uploadProgress");
@@ -1247,11 +1248,13 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(template).toContain("Document indexed and attached");
   });
 
-  it("638 acceptance-checks includes largeInput check for ai-chat-saas", async () => {
+  it("638 acceptance-checks includes largeInput check for 2.7M chars", async () => {
     const fs = await import("fs");
     const checks = fs.readFileSync("apps/web/lib/acceptance-checks.ts", "utf-8");
     expect(checks).toContain("checkLargeInput");
     expect(checks).toContain("largeInput");
+    expect(checks).toContain("2700000");
+    expect(checks).toContain("512000");
     expect(checks).toContain("/api/uploads/init");
     expect(checks).toContain("/api/uploads/${uploadId}/chunk");
     expect(checks).toContain("/api/uploads/${uploadId}/finalize");

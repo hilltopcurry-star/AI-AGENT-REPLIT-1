@@ -356,8 +356,8 @@ async function checkChatCrud(baseUrl: string): Promise<CheckResult> {
 
 async function checkLargeInput(baseUrl: string): Promise<CheckResult> {
   try {
-    const textSize = 500000;
-    const chunkSize = 100000;
+    const textSize = 2700000;
+    const chunkSize = 512000;
     const totalChunks = Math.ceil(textSize / chunkSize);
 
     const chatRes = await httpPost(`${baseUrl}/api/chats`, { title: "Large Input Test" });
