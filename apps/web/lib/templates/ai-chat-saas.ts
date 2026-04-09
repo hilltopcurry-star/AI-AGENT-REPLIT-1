@@ -1301,8 +1301,9 @@ function summarizeChunk(text: string): string {
 }
 
 export async function POST(req: NextRequest, ctx: any) {
+  let uploadId = "";
   try {
-    const uploadId = await resolveUploadId(ctx);
+    uploadId = await resolveUploadId(ctx);
     const upload = await prisma.upload.findUnique({ where: { id: uploadId } });
     if (!upload) {
       return NextResponse.json({ error: "Upload not found" }, { status: 404 });
@@ -1351,10 +1352,12 @@ export async function POST(req: NextRequest, ctx: any) {
       summaryLength: overallSummary.length,
     });
   } catch (e: any) {
-    await prisma.upload.update({
-      where: { id: uploadId },
-      data: { status: "ERROR" },
-    }).catch(() => {});
+    if (uploadId) {
+      await prisma.upload.update({
+        where: { id: uploadId },
+        data: { status: "ERROR" },
+      }).catch(() => {});
+    }
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
