@@ -497,19 +497,29 @@ export default function ChatApp() {
   }
 
   async function copyToClipboard(text: string, messageId: string) {
+    const isBrowser = typeof window !== 'undefined';
+    let ok = false;
     try {
-      await navigator.clipboard.writeText(text);
-      setCopiedId(messageId);
-      setTimeout(() => setCopiedId(prev => prev === messageId ? null : prev), 1500);
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
+      if (isBrowser && navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      }
+    } catch {}
+    if (!ok) {
+      try {
+        if (!isBrowser) return;
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        ok = true;
+      } catch {}
+    }
+    if (ok) {
       setCopiedId(messageId);
       setTimeout(() => setCopiedId(prev => prev === messageId ? null : prev), 1500);
     }

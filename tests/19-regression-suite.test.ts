@@ -1378,4 +1378,16 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(template).toContain("document.execCommand");
     expect(template).toContain("textarea");
   });
+
+  it("653 ai-chat-saas clipboard logic is SSR-safe with browser guard", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("typeof window !== 'undefined'");
+    expect(template).toContain("navigator?.clipboard?.writeText");
+    expect(template).toContain("if (!isBrowser) return");
+    const chatAppContent = template.split("ChatApp")[1] || "";
+    const beforeCopyFn = chatAppContent.split("copyToClipboard")[0] || "";
+    expect(beforeCopyFn).not.toContain("navigator.clipboard");
+    expect(beforeCopyFn).not.toContain("document.createElement");
+  });
 });
