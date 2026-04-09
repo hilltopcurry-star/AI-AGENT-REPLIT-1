@@ -354,13 +354,26 @@ async function checkChatCrud(baseUrl: string): Promise<CheckResult> {
   }
 }
 
+function parseStreamResponse(body: string): string {
+  let text = "";
+  const lines = body.split("\n");
+  for (const line of lines) {
+    if (!line.startsWith("data: ")) continue;
+    try {
+      const parsed = JSON.parse(line.slice(6));
+      if (parsed.type === "token" && parsed.text) text += parsed.text;
+    } catch {}
+  }
+  return text;
+}
+
 async function checkLargeInput(baseUrl: string): Promise<CheckResult> {
   try {
-    const textSize = 2700000;
-    const chunkSize = 512000;
+    const textSize = 10000000;
+    const chunkSize = 1000000;
     const totalChunks = Math.ceil(textSize / chunkSize);
 
-    const chatRes = await httpPost(`${baseUrl}/api/chats`, { title: "Large Input Test" });
+    const chatRes = await httpPost(`${baseUrl}/api/chats`, { title: "Large Input Test 10M" });
     if (chatRes.status !== 201 && chatRes.status !== 200) {
       return { name: "largeInput", passed: false, detail: `Could not create chat: status=${chatRes.status}` };
     }
@@ -372,24 +385,43 @@ async function checkLargeInput(baseUrl: string): Promise<CheckResult> {
     if (initRes.status !== 201) {
       return { name: "largeInput", passed: false, detail: `Upload init failed: status=${initRes.status} body=${initRes.body.slice(0, 200)}` };
     }
-    const { uploadId } = JSON.parse(initRes.body);
+    const initData = JSON.parse(initRes.body);
+    const { uploadId } = initData;
+    const effectiveChunkSize = initData.chunkSize || chunkSize;
+    const effectiveTotalChunks = initData.totalChunks || totalChunks;
     if (!uploadId) {
       return { name: "largeInput", passed: false, detail: "Upload init did not return uploadId" };
     }
 
-    const sampleText = "The quick brown fox jumps over the lazy dog. Software engineering involves designing, developing, testing, and maintaining software applications. ";
-    for (let i = 0; i < totalChunks; i++) {
+    const topicsByChunk: string[] = [
+      "quantum computing algorithms qubits superposition entanglement error correction",
+      "machine learning neural networks deep learning gradient descent backpropagation",
+      "distributed systems consensus protocols raft paxos byzantine fault tolerance",
+      "cryptography encryption decryption public key infrastructure digital signatures",
+      "database optimization indexing query planning sharding replication partitioning",
+      "cloud infrastructure kubernetes containers orchestration microservices deployment",
+      "compiler design lexical analysis parsing abstract syntax trees code generation",
+      "network protocols tcp udp http websockets routing load balancing",
+      "operating systems kernel memory management process scheduling virtual memory",
+      "software engineering testing continuous integration deployment agile methodology",
+    ];
+
+    for (let i = 0; i < effectiveTotalChunks; i++) {
+      const topic = topicsByChunk[i % topicsByChunk.length];
       let chunkContent = "";
-      while (chunkContent.length < chunkSize) {
-        chunkContent += `[Section ${i} paragraph ${chunkContent.length}] ${sampleText}`;
+      const chunkTarget = Math.min(effectiveChunkSize, textSize - i * effectiveChunkSize);
+      while (chunkContent.length < chunkTarget) {
+        chunkContent += `[Section ${i} paragraph ${Math.floor(chunkContent.length / 200)}] This section covers ${topic}. `;
+        chunkContent += `In the field of ${topic.split(" ").slice(0, 2).join(" ")}, researchers have made significant advances. `;
+        chunkContent += "The applications range from theoretical foundations to practical implementations in industry. ";
       }
-      chunkContent = chunkContent.slice(0, chunkSize);
+      chunkContent = chunkContent.slice(0, chunkTarget);
 
       const chunkRes = await httpPost(`${baseUrl}/api/uploads/${uploadId}/chunk`, {
         index: i, content: chunkContent,
       });
       if (chunkRes.status !== 200) {
-        return { name: "largeInput", passed: false, detail: `Chunk ${i} upload failed: status=${chunkRes.status}` };
+        return { name: "largeInput", passed: false, detail: `Chunk ${i}/${effectiveTotalChunks} upload failed: status=${chunkRes.status}` };
       }
     }
 
@@ -407,41 +439,55 @@ async function checkLargeInput(baseUrl: string): Promise<CheckResult> {
       return { name: "largeInput", passed: false, detail: `Upload not READY: status=${statusData.status}` };
     }
 
-    const msgRes = await httpPostStream(
-      `${baseUrl}/api/chats/${chatId}/messages`,
-      { content: "What is this document about? What are the key topics related to software engineering?" },
-      60000
-    );
+    const queries = [
+      "What does this document say about quantum computing and qubits?",
+      "Explain the distributed systems concepts covered, especially consensus protocols.",
+      "What database optimization techniques are discussed in this document?",
+    ];
 
-    if (msgRes.status !== 200) {
-      return { name: "largeInput", passed: false, detail: `Chat message failed after upload: status=${msgRes.status}` };
-    }
-
-    let responseText = "";
-    if (msgRes.contentType.includes("text/event-stream")) {
-      const lines = msgRes.body.split("\n");
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        try {
-          const parsed = JSON.parse(line.slice(6));
-          if (parsed.type === "token" && parsed.text) responseText += parsed.text;
-        } catch {}
+    const queryResults: string[] = [];
+    for (let q = 0; q < queries.length; q++) {
+      const msgRes = await httpPostStream(
+        `${baseUrl}/api/chats/${chatId}/messages`,
+        { content: queries[q] },
+        90000
+      );
+      if (msgRes.status !== 200) {
+        return { name: "largeInput", passed: false, detail: `Query ${q + 1} failed: status=${msgRes.status}` };
       }
+      const responseText = msgRes.contentType.includes("text/event-stream")
+        ? parseStreamResponse(msgRes.body)
+        : msgRes.body;
+
+      if (!responseText || responseText.length < 10) {
+        return { name: "largeInput", passed: false, detail: `Query ${q + 1} response too short: ${responseText.length} chars` };
+      }
+      const hasNextSteps = responseText.toLowerCase().includes("next step");
+      if (!hasNextSteps) {
+        return { name: "largeInput", passed: false, detail: `Query ${q + 1} missing 'Next steps' (${responseText.length} chars)` };
+      }
+      queryResults.push(`Q${q + 1}=${responseText.length}chars`);
     }
 
-    if (!responseText || responseText.length < 10) {
-      return { name: "largeInput", passed: false, detail: `Response too short after large upload: ${responseText.length} chars` };
-    }
-
-    const hasNextSteps = responseText.toLowerCase().includes("next step");
-    if (!hasNextSteps) {
-      return { name: "largeInput", passed: false, detail: `Response missing 'Next steps' section (${responseText.length} chars)` };
+    const perfStart = Date.now();
+    const newChatRes = await httpPost(`${baseUrl}/api/chats`, { title: "Perf Test" });
+    if (newChatRes.status === 200 || newChatRes.status === 201) {
+      const newChatId = JSON.parse(newChatRes.body).id;
+      const perfMsgRes = await httpPostStream(
+        `${baseUrl}/api/chats/${newChatId}/messages`,
+        { content: "Hello, how are you?" },
+        30000
+      );
+      const perfTime = Date.now() - perfStart;
+      if (perfMsgRes.status === 200 && perfTime > 30000) {
+        return { name: "largeInput", passed: false, detail: `New chat too slow after large upload: ${perfTime}ms` };
+      }
     }
 
     return {
       name: "largeInput",
       passed: true,
-      detail: `Uploaded ${textSize} chars in ${totalChunks} chunks, indexed, queried with RAG, got ${responseText.length}-char response with Next Steps`,
+      detail: `Uploaded ${textSize} chars in ${effectiveTotalChunks} chunks, indexed, 3 RAG queries passed (${queryResults.join(", ")}), new-chat perf OK`,
     };
   } catch (e: any) {
     return { name: "largeInput", passed: false, detail: `error: ${e.message}` };

@@ -1229,11 +1229,11 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(template).toContain("isStillIndexing");
   });
 
-  it("636 ai-chat-saas UI detects large paste (>200k) and auto-uploads via 512k chunks", async () => {
+  it("636 ai-chat-saas UI detects large paste (>200k) and auto-uploads via adaptive chunks", async () => {
     const fs = await import("fs");
     const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
     expect(template).toContain("LARGE_PASTE_THRESHOLD = 200000");
-    expect(template).toContain("CHUNK_SIZE = 512000");
+    expect(template).toContain("text.length > 5000000 ? 1000000 : 512000");
     expect(template).toContain("uploadLargeText");
     expect(template).toContain("__pendingLargeText");
     expect(template).toContain("uploadProgress");
@@ -1248,17 +1248,21 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(template).toContain("Document indexed and attached");
   });
 
-  it("638 acceptance-checks includes largeInput check for 2.7M chars", async () => {
+  it("638 acceptance-checks includes largeInput check for 10M chars with 3 queries", async () => {
     const fs = await import("fs");
     const checks = fs.readFileSync("apps/web/lib/acceptance-checks.ts", "utf-8");
     expect(checks).toContain("checkLargeInput");
     expect(checks).toContain("largeInput");
-    expect(checks).toContain("2700000");
-    expect(checks).toContain("512000");
+    expect(checks).toContain("10000000");
+    expect(checks).toContain("1000000");
     expect(checks).toContain("/api/uploads/init");
     expect(checks).toContain("/api/uploads/${uploadId}/chunk");
     expect(checks).toContain("/api/uploads/${uploadId}/finalize");
     expect(checks).toContain("Next step");
+    expect(checks).toContain("quantum computing");
+    expect(checks).toContain("distributed systems");
+    expect(checks).toContain("database optimization");
+    expect(checks).toContain("Perf Test");
   });
 
   it("639 ai-chat-saas requiredRoutes includes upload endpoints", async () => {
@@ -1275,5 +1279,61 @@ describe("AI Chat template (feature-flagged)", () => {
     const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
     expect(template).toContain('"Upload"');
     expect(template).toContain('"DocumentChunk"');
+  });
+
+  it("641 ai-chat-saas RAG uses TF-IDF scoring with multi-pass retrieval", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("idf = Math.log");
+    expect(template).toContain("score += Math.min(tf,");
+    expect(template).toContain("topK = 15");
+    expect(template).toContain("contextBudget = 16000");
+  });
+
+  it("642 ai-chat-saas truth policy in system prompt", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("NEVER bluff");
+    expect(template).toContain("do NOT fabricate");
+    expect(template).toContain("cite the section number");
+  });
+
+  it("643 ai-chat-saas finalize builds document outline and keywords", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("buildOutline");
+    expect(template).toContain("outline:");
+    expect(template).toContain("keywords:");
+    expect(template).toContain("BATCH_SIZE");
+  });
+
+  it("644 ai-chat-saas Upload schema has outline and keywords fields", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("outline     String?");
+    expect(template).toContain("keywords    String?");
+  });
+
+  it("645 ai-chat-saas init endpoint supports adaptive chunk sizes up to 2MB", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("maxChunk = 2000000");
+    expect(template).toContain("minChunk = 512000");
+    expect(template).toContain("Math.max(minChunk, Math.min(maxChunk");
+  });
+
+  it("646 ai-chat-saas RAG includes document outline in context", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("[Document Outline]");
+    expect(template).toContain("upload.outline");
+  });
+
+  it("647 ai-chat-saas stop words filtering in RAG query", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("STOP_RAG");
+    expect(template).toContain("STOP_WORDS");
+    expect(template).toContain("!STOP_RAG.has(w)");
   });
 });

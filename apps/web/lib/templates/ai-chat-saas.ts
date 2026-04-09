@@ -53,6 +53,8 @@ model Upload {
   receivedChunks Int          @default(0)
   totalSize   Int             @default(0)
   summary     String?
+  outline     String?
+  keywords    String?
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
   chunks      DocumentChunk[]
@@ -406,7 +408,7 @@ export default function ChatApp() {
 
   async function uploadLargeText(text: string, chatId: string) {
     setUploadProgress('Initializing upload...');
-    const CHUNK_SIZE = 512000;
+    const CHUNK_SIZE = text.length > 5000000 ? 1000000 : 512000;
     try {
       const initRes = await fetch('/api/uploads/init', {
         method: 'POST',
@@ -965,43 +967,79 @@ export async function POST(req: NextRequest, ctx: any) {
 
     const uploads = await prisma.upload.findMany({
       where: { chatId, status: "READY" },
-      select: { id: true, summary: true },
+      select: { id: true, summary: true, outline: true, keywords: true },
     });
 
     let ragContext = "";
     let hasLargeDocument = false;
+    const STOP_RAG = new Set(["this","that","with","from","have","will","been","more","when","what","which","their","about","would","there","could","other","into","some","than","them","then","these","also","after","before","each","just","only","over","such","very","most","well","much","even","both","same","does","were","your"]);
+
     if (uploads.length > 0) {
       hasLargeDocument = true;
-      const queryWords = msgContent.toLowerCase().replace(/[^a-z0-9\\s]/g, " ").split(/\\s+/).filter((w: string) => w.length > 3);
+      const queryWords = msgContent.toLowerCase().replace(/[^a-z0-9\\s]/g, " ").split(/\\s+/).filter((w: string) => w.length > 3 && !STOP_RAG.has(w));
 
       for (const upload of uploads) {
         if (upload.summary) {
           ragContext += "\\n[Document Summary]\\n" + upload.summary + "\\n";
         }
+        if (upload.outline) {
+          ragContext += "\\n[Document Outline]\\n" + (upload.outline as string).slice(0, 3000) + "\\n";
+        }
 
-        if (queryWords.length > 0) {
-          const allChunks = await prisma.documentChunk.findMany({
-            where: { uploadId: upload.id },
-            orderBy: { index: "asc" },
-            select: { content: true, keywords: true, summary: true, index: true },
-          });
+        const allChunks = await prisma.documentChunk.findMany({
+          where: { uploadId: upload.id },
+          orderBy: { index: "asc" },
+          select: { content: true, keywords: true, summary: true, index: true },
+        });
+
+        if (queryWords.length > 0 && allChunks.length > 0) {
+          const docWordFreq: Record<string, number> = {};
+          for (const chunk of allChunks) {
+            const seen = new Set<string>();
+            const words = ((chunk.keywords || "") + " " + (chunk.content || "").slice(0, 2000)).toLowerCase().split(/\\s+/);
+            for (const w of words) {
+              if (w.length > 3 && !seen.has(w)) { seen.add(w); docWordFreq[w] = (docWordFreq[w] || 0) + 1; }
+            }
+          }
+          const numChunks = allChunks.length;
 
           const scored = allChunks.map((chunk: any) => {
-            const chunkLower = (chunk.keywords || "").toLowerCase() + " " + (chunk.content || "").toLowerCase().slice(0, 500);
+            const chunkText = ((chunk.keywords || "") + " " + (chunk.content || "")).toLowerCase();
             let score = 0;
             for (const qw of queryWords) {
-              if (chunkLower.includes(qw)) score++;
+              if (chunkText.includes(qw)) {
+                const df = docWordFreq[qw] || 1;
+                const idf = Math.log(numChunks / df) + 1;
+                const tf = (chunkText.split(qw).length - 1);
+                score += Math.min(tf, 5) * idf;
+              }
             }
             return { ...chunk, score };
           });
 
           scored.sort((a: any, b: any) => b.score - a.score);
-          const topChunks = scored.filter((c: any) => c.score > 0).slice(0, 5);
+          let topK = 8;
+          let topChunks = scored.filter((c: any) => c.score > 0).slice(0, topK);
+
+          if (topChunks.length > 0 && topChunks[0].score < 2) {
+            topK = 15;
+            topChunks = scored.filter((c: any) => c.score > 0).slice(0, topK);
+          }
+
           if (topChunks.length > 0) {
-            ragContext += "\\n[Relevant Sections]\\n";
+            ragContext += "\\n[Relevant Sections — " + topChunks.length + " of " + numChunks + " chunks matched]\\n";
+            let contextBudget = 16000;
             for (const tc of topChunks) {
-              ragContext += "[Section " + tc.index + "] " + tc.content.slice(0, 2000) + "\\n";
+              if (contextBudget <= 0) break;
+              const chunkText = tc.content.slice(0, Math.min(3000, contextBudget));
+              ragContext += "[Section " + tc.index + " (score=" + tc.score.toFixed(1) + ")] " + chunkText + "\\n";
+              contextBudget -= chunkText.length;
             }
+          }
+        } else if (allChunks.length > 0) {
+          ragContext += "\\n[First sections of document]\\n";
+          for (const c of allChunks.slice(0, 3)) {
+            ragContext += "[Section " + c.index + "] " + c.content.slice(0, 2000) + "\\n";
           }
         }
       }
@@ -1067,7 +1105,7 @@ export async function POST(req: NextRequest, ctx: any) {
         try {
           let systemPrompt = "You are a helpful AI assistant.";
           if (hasLargeDocument) {
-            systemPrompt += " The user has uploaded a large document. Use the retrieved context to answer their question accurately. Always end your response with a '## Next Steps' section listing 2-4 actionable suggestions for what the user could do or ask next.";
+            systemPrompt += " The user has uploaded a large document. RETRIEVAL RULES: 1) Use ONLY the retrieved context sections to answer — do NOT fabricate content that is not in the provided sections. 2) If the retrieved sections do not contain enough information to fully answer, explicitly say 'The retrieved context does not cover this topic — please ask me to look at a specific section or rephrase your question.' 3) When quoting from the document, cite the section number (e.g., [Section 3]). 4) Always end your response with a '## Next Steps' section listing 2-4 actionable suggestions. 5) NEVER bluff or make up document content.";
           }
           if (isStillIndexing) {
             systemPrompt += " Note: Some content is still being indexed. Let the user know you're working with partial content and will have more complete answers once indexing finishes.";
@@ -1200,7 +1238,10 @@ export async function POST(req: NextRequest) {
     if (!totalSize || totalSize < 1) {
       return NextResponse.json({ error: "totalSize is required" }, { status: 400 });
     }
-    const effectiveChunkSize = chunkSize || 512000;
+    const maxChunk = 2000000;
+    const minChunk = 512000;
+    const requestedChunk = chunkSize || (totalSize > 5000000 ? 1000000 : 512000);
+    const effectiveChunkSize = Math.max(minChunk, Math.min(maxChunk, requestedChunk));
     const totalChunks = Math.ceil(totalSize / effectiveChunkSize);
 
     const upload = await prisma.upload.create({
@@ -1282,22 +1323,35 @@ async function resolveUploadId(ctx: any): Promise<string> {
   return resolved.uploadId;
 }
 
-function extractKeywords(text: string): string {
-  const words = text.toLowerCase().replace(/[^a-z0-9\\s]/g, " ").split(/\\s+/).filter(w => w.length > 3);
+const STOP_WORDS = new Set(["this","that","with","from","have","will","been","more","when","what","which","their","about","would","there","could","other","into","some","than","them","then","these","also","after","before","each","just","only","over","such","very","most","well","much","even","both","same","does","were","your"]);
+
+function extractKeywords(text: string, topN: number = 30): string {
+  const words = text.toLowerCase().replace(/[^a-z0-9\\s]/g, " ").split(/\\s+/).filter(w => w.length > 3 && !STOP_WORDS.has(w));
   const freq: Record<string, number> = {};
   for (const w of words) freq[w] = (freq[w] || 0) + 1;
+  const totalWords = words.length || 1;
   return Object.entries(freq)
+    .map(([w, c]) => [w, c / totalWords] as [string, number])
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 20)
+    .slice(0, topN)
     .map(([w]) => w)
     .join(" ");
 }
 
 function summarizeChunk(text: string): string {
   const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 10);
-  const picks = sentences.slice(0, 3).map(s => s.trim());
-  if (picks.length === 0) return text.slice(0, 200);
+  const picks = sentences.slice(0, 5).map(s => s.trim());
+  if (picks.length === 0) return text.slice(0, 300);
   return picks.join(". ") + ".";
+}
+
+function buildOutline(chunkSummaries: string[], chunkKeywords: string[]): string {
+  const parts: string[] = [];
+  for (let i = 0; i < chunkSummaries.length; i++) {
+    const kw = chunkKeywords[i] ? " [Topics: " + chunkKeywords[i].split(" ").slice(0, 5).join(", ") + "]" : "";
+    parts.push("Section " + i + ": " + chunkSummaries[i].slice(0, 150) + kw);
+  }
+  return parts.join("\\n");
 }
 
 export async function POST(req: NextRequest, ctx: any) {
@@ -1323,25 +1377,39 @@ export async function POST(req: NextRequest, ctx: any) {
     });
 
     const chunkSummaries: string[] = [];
-    for (const chunk of chunks) {
-      const keywords = extractKeywords(chunk.content);
-      const summary = summarizeChunk(chunk.content);
-      chunkSummaries.push(summary);
-      await prisma.documentChunk.update({
-        where: { id: chunk.id },
-        data: { keywords, summary },
+    const chunkKeywordsList: string[] = [];
+    const BATCH_SIZE = 5;
+    for (let b = 0; b < chunks.length; b += BATCH_SIZE) {
+      const batch = chunks.slice(b, b + BATCH_SIZE);
+      const updates = batch.map(chunk => {
+        const keywords = extractKeywords(chunk.content, 30);
+        const summary = summarizeChunk(chunk.content);
+        chunkSummaries.push(summary);
+        chunkKeywordsList.push(keywords);
+        return prisma.documentChunk.update({
+          where: { id: chunk.id },
+          data: { keywords, summary },
+        });
       });
+      await Promise.all(updates);
     }
 
-    const overallSummary = chunkSummaries.length > 5
-      ? chunkSummaries.slice(0, 3).join(" ") + " ... [" + chunkSummaries.length + " sections total]"
+    const allKeywords = chunkKeywordsList.join(" ");
+    const docKeywords = extractKeywords(allKeywords, 50);
+
+    const overallSummary = chunkSummaries.length > 8
+      ? chunkSummaries.slice(0, 4).join(" ") + " ... [" + chunkSummaries.length + " sections total] ... " + chunkSummaries.slice(-2).join(" ")
       : chunkSummaries.join(" ");
+
+    const outline = buildOutline(chunkSummaries, chunkKeywordsList);
 
     await prisma.upload.update({
       where: { id: uploadId },
       data: {
         status: "READY",
-        summary: overallSummary.slice(0, 5000),
+        summary: overallSummary.slice(0, 8000),
+        outline: outline.slice(0, 10000),
+        keywords: docKeywords.slice(0, 2000),
       },
     });
 
@@ -1350,6 +1418,7 @@ export async function POST(req: NextRequest, ctx: any) {
       status: "READY",
       chunksProcessed: chunks.length,
       summaryLength: overallSummary.length,
+      outlineLength: outline.length,
     });
   } catch (e: any) {
     if (uploadId) {
