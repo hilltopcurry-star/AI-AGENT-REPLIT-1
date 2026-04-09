@@ -1168,4 +1168,109 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(attachCalls).toBeTruthy();
     expect(attachCalls!.length).toBeGreaterThanOrEqual(3);
   });
+
+  it("629 ai-chat-saas template includes Upload and DocumentChunk Prisma models", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("model Upload {");
+    expect(template).toContain("model DocumentChunk {");
+    expect(template).toContain("uploads   Upload[]");
+    expect(template).toContain("uploadId  String");
+  });
+
+  it("630 ai-chat-saas template includes /api/uploads/init endpoint", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("app/api/uploads/init/route.ts");
+    expect(template).toContain("totalSize");
+    expect(template).toContain("totalChunks");
+    expect(template).toContain("uploadId");
+  });
+
+  it("631 ai-chat-saas template includes /api/uploads/[uploadId]/chunk endpoint", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("app/api/uploads/[uploadId]/chunk/route.ts");
+    expect(template).toContain("resolveUploadId");
+    expect(template).toContain("documentChunk.create");
+    expect(template).toContain("receivedChunks");
+  });
+
+  it("632 ai-chat-saas template includes /api/uploads/[uploadId]/finalize endpoint", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("app/api/uploads/[uploadId]/finalize/route.ts");
+    expect(template).toContain("extractKeywords");
+    expect(template).toContain("summarizeChunk");
+    expect(template).toContain("READY");
+  });
+
+  it("633 ai-chat-saas template includes /api/uploads/[uploadId]/status endpoint", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("app/api/uploads/[uploadId]/status/route.ts");
+  });
+
+  it("634 ai-chat-saas messages endpoint includes RAG retrieval for uploaded documents", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("ragContext");
+    expect(template).toContain("hasLargeDocument");
+    expect(template).toContain("Retrieved context from uploaded documents");
+    expect(template).toContain("Relevant Sections");
+    expect(template).toContain("Document Summary");
+  });
+
+  it("635 ai-chat-saas system prompt includes Next Steps for large document chats", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("Next Steps");
+    expect(template).toContain("hasLargeDocument");
+    expect(template).toContain("isStillIndexing");
+  });
+
+  it("636 ai-chat-saas UI detects large paste and auto-uploads via chunks", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("LARGE_PASTE_THRESHOLD");
+    expect(template).toContain("uploadLargeText");
+    expect(template).toContain("__pendingLargeText");
+    expect(template).toContain("uploadProgress");
+    expect(template).toContain("text-upload-progress");
+  });
+
+  it("637 ai-chat-saas UI shows document-attached indicator", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("attachedUploadId");
+    expect(template).toContain("text-upload-attached");
+    expect(template).toContain("Document indexed and attached");
+  });
+
+  it("638 acceptance-checks includes largeInput check for ai-chat-saas", async () => {
+    const fs = await import("fs");
+    const checks = fs.readFileSync("apps/web/lib/acceptance-checks.ts", "utf-8");
+    expect(checks).toContain("checkLargeInput");
+    expect(checks).toContain("largeInput");
+    expect(checks).toContain("/api/uploads/init");
+    expect(checks).toContain("/api/uploads/${uploadId}/chunk");
+    expect(checks).toContain("/api/uploads/${uploadId}/finalize");
+    expect(checks).toContain("Next step");
+  });
+
+  it("639 ai-chat-saas requiredRoutes includes upload endpoints", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("/api/uploads/init");
+    expect(template).toContain("/api/uploads/[uploadId]/chunk");
+    expect(template).toContain("/api/uploads/[uploadId]/finalize");
+    expect(template).toContain("/api/uploads/[uploadId]/status");
+  });
+
+  it("640 ai-chat-saas requiredEntities includes Upload and DocumentChunk", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain('"Upload"');
+    expect(template).toContain('"DocumentChunk"');
+  });
 });

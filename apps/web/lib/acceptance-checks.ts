@@ -354,6 +354,100 @@ async function checkChatCrud(baseUrl: string): Promise<CheckResult> {
   }
 }
 
+async function checkLargeInput(baseUrl: string): Promise<CheckResult> {
+  try {
+    const textSize = 500000;
+    const chunkSize = 100000;
+    const totalChunks = Math.ceil(textSize / chunkSize);
+
+    const chatRes = await httpPost(`${baseUrl}/api/chats`, { title: "Large Input Test" });
+    if (chatRes.status !== 201 && chatRes.status !== 200) {
+      return { name: "largeInput", passed: false, detail: `Could not create chat: status=${chatRes.status}` };
+    }
+    const chatId = JSON.parse(chatRes.body).id;
+
+    const initRes = await httpPost(`${baseUrl}/api/uploads/init`, {
+      chatId, totalSize: textSize, chunkSize,
+    });
+    if (initRes.status !== 201) {
+      return { name: "largeInput", passed: false, detail: `Upload init failed: status=${initRes.status} body=${initRes.body.slice(0, 200)}` };
+    }
+    const { uploadId } = JSON.parse(initRes.body);
+    if (!uploadId) {
+      return { name: "largeInput", passed: false, detail: "Upload init did not return uploadId" };
+    }
+
+    const sampleText = "The quick brown fox jumps over the lazy dog. Software engineering involves designing, developing, testing, and maintaining software applications. ";
+    for (let i = 0; i < totalChunks; i++) {
+      let chunkContent = "";
+      while (chunkContent.length < chunkSize) {
+        chunkContent += `[Section ${i} paragraph ${chunkContent.length}] ${sampleText}`;
+      }
+      chunkContent = chunkContent.slice(0, chunkSize);
+
+      const chunkRes = await httpPost(`${baseUrl}/api/uploads/${uploadId}/chunk`, {
+        index: i, content: chunkContent,
+      });
+      if (chunkRes.status !== 200) {
+        return { name: "largeInput", passed: false, detail: `Chunk ${i} upload failed: status=${chunkRes.status}` };
+      }
+    }
+
+    const finalizeRes = await httpPost(`${baseUrl}/api/uploads/${uploadId}/finalize`, {});
+    if (finalizeRes.status !== 200) {
+      return { name: "largeInput", passed: false, detail: `Finalize failed: status=${finalizeRes.status} body=${finalizeRes.body.slice(0, 200)}` };
+    }
+
+    const statusRes = await httpGet(`${baseUrl}/api/uploads/${uploadId}/status`);
+    if (statusRes.status !== 200) {
+      return { name: "largeInput", passed: false, detail: `Status check failed: ${statusRes.status}` };
+    }
+    const statusData = JSON.parse(statusRes.body);
+    if (statusData.status !== "READY") {
+      return { name: "largeInput", passed: false, detail: `Upload not READY: status=${statusData.status}` };
+    }
+
+    const msgRes = await httpPostStream(
+      `${baseUrl}/api/chats/${chatId}/messages`,
+      { content: "What is this document about? What are the key topics related to software engineering?" },
+      60000
+    );
+
+    if (msgRes.status !== 200) {
+      return { name: "largeInput", passed: false, detail: `Chat message failed after upload: status=${msgRes.status}` };
+    }
+
+    let responseText = "";
+    if (msgRes.contentType.includes("text/event-stream")) {
+      const lines = msgRes.body.split("\n");
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const parsed = JSON.parse(line.slice(6));
+          if (parsed.type === "token" && parsed.text) responseText += parsed.text;
+        } catch {}
+      }
+    }
+
+    if (!responseText || responseText.length < 10) {
+      return { name: "largeInput", passed: false, detail: `Response too short after large upload: ${responseText.length} chars` };
+    }
+
+    const hasNextSteps = responseText.toLowerCase().includes("next step");
+    if (!hasNextSteps) {
+      return { name: "largeInput", passed: false, detail: `Response missing 'Next steps' section (${responseText.length} chars)` };
+    }
+
+    return {
+      name: "largeInput",
+      passed: true,
+      detail: `Uploaded ${textSize} chars in ${totalChunks} chunks, indexed, queried with RAG, got ${responseText.length}-char response with Next Steps`,
+    };
+  } catch (e: any) {
+    return { name: "largeInput", passed: false, detail: `error: ${e.message}` };
+  }
+}
+
 async function checkCrud(baseUrl: string): Promise<CheckResult> {
   try {
     const projRes = await httpPost(`${baseUrl}/api/projects`, {
@@ -454,8 +548,13 @@ export async function runAcceptanceChecks(
     await logJob(jobId, chatCrudResult.passed ? "SUCCESS" : "ERROR",
       `[ACCEPTANCE] chatCrud ${chatCrudResult.passed ? "OK" : "FAIL"}: ${chatCrudResult.detail}`);
 
-    const summary = `chatHomepage:${chatHomeResult.passed ? "OK" : "FAIL"} dbCheck:${dbResult.passed ? "OK" : "FAIL"} aiStatus:${aiStatusResult.passed ? "OK" : "FAIL"} chatCrud:${chatCrudResult.passed ? "OK" : "FAIL"}`;
-    const allPassed = chatHomeResult.passed && dbResult.passed && aiStatusResult.passed && chatCrudResult.passed;
+    const largeInputResult = await checkLargeInput(effectiveUrl);
+    checks.push(largeInputResult);
+    await logJob(jobId, largeInputResult.passed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] largeInput ${largeInputResult.passed ? "OK" : "FAIL"}: ${largeInputResult.detail}`);
+
+    const summary = `chatHomepage:${chatHomeResult.passed ? "OK" : "FAIL"} dbCheck:${dbResult.passed ? "OK" : "FAIL"} aiStatus:${aiStatusResult.passed ? "OK" : "FAIL"} chatCrud:${chatCrudResult.passed ? "OK" : "FAIL"} largeInput:${largeInputResult.passed ? "OK" : "FAIL"}`;
+    const allPassed = chatHomeResult.passed && dbResult.passed && aiStatusResult.passed && chatCrudResult.passed && largeInputResult.passed;
     await logJob(jobId, allPassed ? "SUCCESS" : "ERROR",
       `[ACCEPTANCE] result=${allPassed ? "PASS" : "FAIL"} checks=${summary}`);
   } else if (templateKey) {

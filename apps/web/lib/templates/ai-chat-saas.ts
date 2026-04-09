@@ -29,6 +29,7 @@ model Chat {
   userId    String
   user      User      @relation(fields: [userId], references: [id])
   messages  Message[]
+  uploads   Upload[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 }
@@ -41,6 +42,31 @@ model Message {
   chatId    String
   chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+}
+
+model Upload {
+  id          String          @id @default(cuid())
+  chatId      String?
+  chat        Chat?           @relation(fields: [chatId], references: [id], onDelete: SetNull)
+  status      String          @default("PENDING")
+  totalChunks Int             @default(0)
+  receivedChunks Int          @default(0)
+  totalSize   Int             @default(0)
+  summary     String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  chunks      DocumentChunk[]
+}
+
+model DocumentChunk {
+  id        String   @id @default(cuid())
+  uploadId  String
+  upload    Upload   @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  index     Int
+  content   String
+  summary   String?
+  keywords  String?
+  createdAt DateTime @default(now())
 }`,
     },
     {
@@ -49,6 +75,9 @@ model Message {
 const nextConfig = {
   output: "standalone",
   reactStrictMode: false,
+  experimental: {
+    serverActions: { bodySizeLimit: "10mb" },
+  },
 };
 module.exports = nextConfig;
 `,
@@ -309,6 +338,8 @@ export default function ChatApp() {
   const [aiModel, setAiModel] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  const [attachedUploadId, setAttachedUploadId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -371,6 +402,50 @@ export default function ChatApp() {
     if (file) attachImage(file);
   }
 
+  const LARGE_PASTE_THRESHOLD = 50000;
+
+  async function uploadLargeText(text: string, chatId: string) {
+    setUploadProgress('Initializing upload...');
+    const CHUNK_SIZE = 100000;
+    try {
+      const initRes = await fetch('/api/uploads/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, totalSize: text.length, chunkSize: CHUNK_SIZE }),
+      });
+      if (!initRes.ok) throw new Error('Upload init failed');
+      const { uploadId, totalChunks } = await initRes.json();
+
+      for (let i = 0; i < totalChunks; i++) {
+        setUploadProgress(\`Uploading chunk \${i + 1}/\${totalChunks}...\`);
+        const start = i * CHUNK_SIZE;
+        const chunkContent = text.slice(start, start + CHUNK_SIZE);
+        const chunkRes = await fetch(\`/api/uploads/\${uploadId}/chunk\`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ index: i, content: chunkContent }),
+        });
+        if (!chunkRes.ok) throw new Error(\`Chunk \${i} upload failed\`);
+      }
+
+      setUploadProgress('Indexing content...');
+      const finalRes = await fetch(\`/api/uploads/\${uploadId}/finalize\`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!finalRes.ok) throw new Error('Finalize failed');
+
+      setAttachedUploadId(uploadId);
+      setUploadProgress(null);
+      return uploadId;
+    } catch (err: any) {
+      setUploadProgress('Upload failed: ' + err.message);
+      setTimeout(() => setUploadProgress(null), 3000);
+      return null;
+    }
+  }
+
   function handlePaste(e: React.ClipboardEvent) {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -381,6 +456,12 @@ export default function ChatApp() {
         if (file) attachImage(file);
         return;
       }
+    }
+    const pastedText = e.clipboardData?.getData('text') || '';
+    if (pastedText.length > LARGE_PASTE_THRESHOLD) {
+      e.preventDefault();
+      setInput('[Large document pasted - ' + Math.round(pastedText.length / 1000) + 'k chars]');
+      (window as any).__pendingLargeText = pastedText;
     }
   }
 
@@ -423,6 +504,12 @@ export default function ChatApp() {
       } catch { return; }
     }
 
+    const pendingLargeText = (window as any).__pendingLargeText;
+    if (pendingLargeText && chatId) {
+      (window as any).__pendingLargeText = null;
+      await uploadLargeText(pendingLargeText, chatId);
+    }
+
     const userContent = input.trim() || (imageFile ? '[Image sent]' : '');
     const userMsg: Message = {
       id: 'temp-' + Date.now(),
@@ -435,6 +522,7 @@ export default function ChatApp() {
     const currentImage = imagePreview;
     setInput('');
     clearImage();
+    setAttachedUploadId(null);
     setLoading(true);
     setStreamingText('');
 
@@ -562,6 +650,17 @@ export default function ChatApp() {
             </div>
           )}
           <div className="input-area" onDrop={handleDrop} onDragOver={handleDragOver} data-testid="drop-zone">
+            {uploadProgress && (
+              <div style={{ padding: '0.5rem 0.75rem', background: '#1e3a5f', borderRadius: 8, marginBottom: '0.5rem', fontSize: '0.875rem', color: '#93c5fd', display: 'flex', alignItems: 'center', gap: '0.5rem' }} data-testid="text-upload-progress">
+                <span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>&#8987;</span>
+                {uploadProgress}
+              </div>
+            )}
+            {attachedUploadId && !uploadProgress && (
+              <div style={{ padding: '0.25rem 0.75rem', background: '#1a2e1a', borderRadius: 8, marginBottom: '0.5rem', fontSize: '0.8125rem', color: '#86efac' }} data-testid="text-upload-attached">
+                &#128196; Document indexed and attached to this chat
+              </div>
+            )}
             {imagePreview && (
               <div className="image-attachment">
                 <img src={imagePreview} alt="preview" style={{ width: 40, height: 40, borderRadius: 4, objectFit: 'cover' }} />
@@ -864,6 +963,55 @@ export async function POST(req: NextRequest, ctx: any) {
       ? history.slice(history.length - MAX_HISTORY)
       : history;
 
+    const uploads = await prisma.upload.findMany({
+      where: { chatId, status: "READY" },
+      select: { id: true, summary: true },
+    });
+
+    let ragContext = "";
+    let hasLargeDocument = false;
+    if (uploads.length > 0) {
+      hasLargeDocument = true;
+      const queryWords = msgContent.toLowerCase().replace(/[^a-z0-9\\s]/g, " ").split(/\\s+/).filter((w: string) => w.length > 3);
+
+      for (const upload of uploads) {
+        if (upload.summary) {
+          ragContext += "\\n[Document Summary]\\n" + upload.summary + "\\n";
+        }
+
+        if (queryWords.length > 0) {
+          const allChunks = await prisma.documentChunk.findMany({
+            where: { uploadId: upload.id },
+            orderBy: { index: "asc" },
+            select: { content: true, keywords: true, summary: true, index: true },
+          });
+
+          const scored = allChunks.map((chunk: any) => {
+            const chunkLower = (chunk.keywords || "").toLowerCase() + " " + (chunk.content || "").toLowerCase().slice(0, 500);
+            let score = 0;
+            for (const qw of queryWords) {
+              if (chunkLower.includes(qw)) score++;
+            }
+            return { ...chunk, score };
+          });
+
+          scored.sort((a: any, b: any) => b.score - a.score);
+          const topChunks = scored.filter((c: any) => c.score > 0).slice(0, 5);
+          if (topChunks.length > 0) {
+            ragContext += "\\n[Relevant Sections]\\n";
+            for (const tc of topChunks) {
+              ragContext += "[Section " + tc.index + "] " + tc.content.slice(0, 2000) + "\\n";
+            }
+          }
+        }
+      }
+    }
+
+    const processingUploads = await prisma.upload.findMany({
+      where: { chatId, status: { in: ["UPLOADING", "PROCESSING"] } },
+    });
+    const isStillIndexing = processingUploads.length > 0;
+
     const claudeMessages: Array<{ role: "user" | "assistant"; content: any }> = [];
     for (const m of recentHistory) {
       if (m.role === "assistant") {
@@ -896,6 +1044,19 @@ export async function POST(req: NextRequest, ctx: any) {
       }
     }
 
+    if (ragContext) {
+      const lastIdx = claudeMessages.length - 1;
+      if (lastIdx >= 0 && claudeMessages[lastIdx].role === "user") {
+        const existing = typeof claudeMessages[lastIdx].content === "string"
+          ? claudeMessages[lastIdx].content
+          : msgContent;
+        claudeMessages[lastIdx] = {
+          role: "user",
+          content: "[Retrieved context from uploaded documents]\\n" + ragContext.slice(0, 8000) + "\\n\\n[User question]\\n" + existing,
+        };
+      }
+    }
+
     const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
     const keyPreview = apiKey.slice(0, 10) + "..." + apiKey.slice(-4);
     console.log("[AI-CHAT] Starting Claude request: model=" + model + " key=" + keyPreview + " messages=" + claudeMessages.length);
@@ -904,9 +1065,18 @@ export async function POST(req: NextRequest, ctx: any) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const reqBody = {
+          let systemPrompt = "You are a helpful AI assistant.";
+          if (hasLargeDocument) {
+            systemPrompt += " The user has uploaded a large document. Use the retrieved context to answer their question accurately. Always end your response with a '## Next Steps' section listing 2-4 actionable suggestions for what the user could do or ask next.";
+          }
+          if (isStillIndexing) {
+            systemPrompt += " Note: Some content is still being indexed. Let the user know you're working with partial content and will have more complete answers once indexing finishes.";
+          }
+
+          const reqBody: any = {
             model,
             max_tokens: 4096,
+            system: systemPrompt,
             messages: claudeMessages,
             stream: true,
           };
@@ -1009,6 +1179,218 @@ export async function POST(req: NextRequest, ctx: any) {
     });
   } catch (e: any) {
     console.error("[MESSAGES POST]", e);
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+`,
+    },
+    {
+      path: "app/api/uploads/init/route.ts",
+      content: `import { NextRequest, NextResponse } from "next/server";
+import { PrismaClient } from "@prisma/client";
+
+export const dynamic = "force-dynamic";
+
+const prisma = new PrismaClient();
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { chatId, totalSize, chunkSize } = body;
+    if (!totalSize || totalSize < 1) {
+      return NextResponse.json({ error: "totalSize is required" }, { status: 400 });
+    }
+    const effectiveChunkSize = chunkSize || 100000;
+    const totalChunks = Math.ceil(totalSize / effectiveChunkSize);
+
+    const upload = await prisma.upload.create({
+      data: {
+        chatId: chatId || null,
+        status: "UPLOADING",
+        totalChunks,
+        totalSize,
+      },
+    });
+    return NextResponse.json({
+      uploadId: upload.id,
+      totalChunks,
+      chunkSize: effectiveChunkSize,
+      status: upload.status,
+    }, { status: 201 });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+`,
+    },
+    {
+      path: "app/api/uploads/[uploadId]/chunk/route.ts",
+      content: `import { NextRequest, NextResponse } from "next/server";
+import { PrismaClient } from "@prisma/client";
+
+export const dynamic = "force-dynamic";
+
+const prisma = new PrismaClient();
+
+async function resolveUploadId(ctx: any): Promise<string> {
+  const p = ctx.params;
+  const resolved = typeof p?.then === "function" ? await p : p;
+  return resolved.uploadId;
+}
+
+export async function POST(req: NextRequest, ctx: any) {
+  try {
+    const uploadId = await resolveUploadId(ctx);
+    const body = await req.json();
+    const { index, content } = body;
+    if (index === undefined || !content) {
+      return NextResponse.json({ error: "index and content are required" }, { status: 400 });
+    }
+    const upload = await prisma.upload.findUnique({ where: { id: uploadId } });
+    if (!upload) {
+      return NextResponse.json({ error: "Upload not found" }, { status: 404 });
+    }
+    if (upload.status !== "UPLOADING") {
+      return NextResponse.json({ error: "Upload is not in UPLOADING state" }, { status: 400 });
+    }
+    await prisma.documentChunk.create({
+      data: { uploadId, index, content },
+    });
+    await prisma.upload.update({
+      where: { id: uploadId },
+      data: { receivedChunks: { increment: 1 } },
+    });
+    return NextResponse.json({ ok: true, index });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+`,
+    },
+    {
+      path: "app/api/uploads/[uploadId]/finalize/route.ts",
+      content: `import { NextRequest, NextResponse } from "next/server";
+import { PrismaClient } from "@prisma/client";
+
+export const dynamic = "force-dynamic";
+
+const prisma = new PrismaClient();
+
+async function resolveUploadId(ctx: any): Promise<string> {
+  const p = ctx.params;
+  const resolved = typeof p?.then === "function" ? await p : p;
+  return resolved.uploadId;
+}
+
+function extractKeywords(text: string): string {
+  const words = text.toLowerCase().replace(/[^a-z0-9\\s]/g, " ").split(/\\s+/).filter(w => w.length > 3);
+  const freq: Record<string, number> = {};
+  for (const w of words) freq[w] = (freq[w] || 0) + 1;
+  return Object.entries(freq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 20)
+    .map(([w]) => w)
+    .join(" ");
+}
+
+function summarizeChunk(text: string): string {
+  const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 10);
+  const picks = sentences.slice(0, 3).map(s => s.trim());
+  if (picks.length === 0) return text.slice(0, 200);
+  return picks.join(". ") + ".";
+}
+
+export async function POST(req: NextRequest, ctx: any) {
+  try {
+    const uploadId = await resolveUploadId(ctx);
+    const upload = await prisma.upload.findUnique({ where: { id: uploadId } });
+    if (!upload) {
+      return NextResponse.json({ error: "Upload not found" }, { status: 404 });
+    }
+    if (upload.status !== "UPLOADING") {
+      return NextResponse.json({ error: "Upload already finalized" }, { status: 400 });
+    }
+
+    await prisma.upload.update({
+      where: { id: uploadId },
+      data: { status: "PROCESSING" },
+    });
+
+    const chunks = await prisma.documentChunk.findMany({
+      where: { uploadId },
+      orderBy: { index: "asc" },
+    });
+
+    const chunkSummaries: string[] = [];
+    for (const chunk of chunks) {
+      const keywords = extractKeywords(chunk.content);
+      const summary = summarizeChunk(chunk.content);
+      chunkSummaries.push(summary);
+      await prisma.documentChunk.update({
+        where: { id: chunk.id },
+        data: { keywords, summary },
+      });
+    }
+
+    const overallSummary = chunkSummaries.length > 5
+      ? chunkSummaries.slice(0, 3).join(" ") + " ... [" + chunkSummaries.length + " sections total]"
+      : chunkSummaries.join(" ");
+
+    await prisma.upload.update({
+      where: { id: uploadId },
+      data: {
+        status: "READY",
+        summary: overallSummary.slice(0, 5000),
+      },
+    });
+
+    return NextResponse.json({
+      ok: true,
+      status: "READY",
+      chunksProcessed: chunks.length,
+      summaryLength: overallSummary.length,
+    });
+  } catch (e: any) {
+    await prisma.upload.update({
+      where: { id: uploadId },
+      data: { status: "ERROR" },
+    }).catch(() => {});
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+`,
+    },
+    {
+      path: "app/api/uploads/[uploadId]/status/route.ts",
+      content: `import { NextRequest, NextResponse } from "next/server";
+import { PrismaClient } from "@prisma/client";
+
+export const dynamic = "force-dynamic";
+
+const prisma = new PrismaClient();
+
+async function resolveUploadId(ctx: any): Promise<string> {
+  const p = ctx.params;
+  const resolved = typeof p?.then === "function" ? await p : p;
+  return resolved.uploadId;
+}
+
+export async function GET(_req: NextRequest, ctx: any) {
+  try {
+    const uploadId = await resolveUploadId(ctx);
+    const upload = await prisma.upload.findUnique({
+      where: { id: uploadId },
+      select: {
+        id: true, status: true, totalChunks: true,
+        receivedChunks: true, totalSize: true, summary: true,
+        chatId: true,
+      },
+    });
+    if (!upload) {
+      return NextResponse.json({ error: "Upload not found" }, { status: 404 });
+    }
+    return NextResponse.json(upload);
+  } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
@@ -1136,8 +1518,12 @@ export const aiChatSaasTemplate: TemplateDefinition = {
     "/api/chats",
     "/api/chats/[chatId]",
     "/api/chats/[chatId]/messages",
+    "/api/uploads/init",
+    "/api/uploads/[uploadId]/chunk",
+    "/api/uploads/[uploadId]/finalize",
+    "/api/uploads/[uploadId]/status",
   ],
-  requiredEntities: ["User", "Chat", "Message"],
+  requiredEntities: ["User", "Chat", "Message", "Upload", "DocumentChunk"],
   getFiles,
   getPackageJson,
 };
