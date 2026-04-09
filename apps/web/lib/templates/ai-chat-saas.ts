@@ -223,6 +223,16 @@ body {
 .image-attachment button {
   background: none; border: none; color: #ef4444; cursor: pointer; font-size: 0.75rem;
 }
+.copy-btn {
+  position: absolute; top: 0.25rem; right: 0.25rem; opacity: 0;
+  background: rgba(30,30,40,0.7); border: 1px solid rgba(255,255,255,0.15);
+  color: #a0a0b0; cursor: pointer; font-size: 0.6875rem;
+  padding: 0.15rem 0.5rem; border-radius: 4px;
+  transition: opacity 0.15s, background 0.15s;
+}
+.message-content { position: relative; }
+.message-content:hover .copy-btn { opacity: 1; }
+.copy-btn:hover { background: rgba(60,60,80,0.9); color: #e0e0f0; }
 .input-hint {
   font-size: 0.6875rem; color: #6b7280; text-align: center;
   padding: 0.25rem 0 0; user-select: none;
@@ -342,6 +352,7 @@ export default function ChatApp() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [attachedUploadId, setAttachedUploadId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -483,6 +494,25 @@ export default function ChatApp() {
     setImageFile(null);
     setImagePreview(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  async function copyToClipboard(text: string, messageId: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(messageId);
+      setTimeout(() => setCopiedId(prev => prev === messageId ? null : prev), 1500);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopiedId(messageId);
+      setTimeout(() => setCopiedId(prev => prev === messageId ? null : prev), 1500);
+    }
   }
 
   async function sendMessage(e: React.FormEvent) {
@@ -630,11 +660,19 @@ export default function ChatApp() {
                   <div className={\`message-avatar \${m.role}\`}>
                     {m.role === 'user' ? 'U' : 'AI'}
                   </div>
-                  <div className="message-content">
+                  <div className="message-content" data-copy-text={m.content}>
                     {m.imageUrl && (
                       <img src={m.imageUrl} alt="attachment" className="image-preview" />
                     )}
                     <p style={{ whiteSpace: 'pre-wrap' }}>{m.content}</p>
+                    <button
+                      className="copy-btn"
+                      onClick={() => copyToClipboard(m.content, m.id)}
+                      title={copiedId === m.id ? 'Copied' : 'Copy'}
+                      data-testid={\`btn-copy-message-\${m.id}\`}
+                    >
+                      {copiedId === m.id ? '\\u2713 Copied' : '\\u2398 Copy'}
+                    </button>
                   </div>
                 </div>
               ))}

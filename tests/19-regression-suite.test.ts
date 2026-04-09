@@ -1336,4 +1336,46 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(template).toContain("STOP_WORDS");
     expect(template).toContain("!STOP_RAG.has(w)");
   });
+
+  it("648 ai-chat-saas every message has a Copy button with data-testid", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("btn-copy-message-");
+    expect(template).toContain("copy-btn");
+    expect(template).toContain("copyToClipboard");
+    expect(template).toContain("navigator.clipboard.writeText");
+  });
+
+  it("649 ai-chat-saas Copy button copies exact raw content via data-copy-text", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("data-copy-text={m.content}");
+    expect(template).toContain("copyToClipboard(m.content, m.id)");
+    expect(template).not.toContain("copyToClipboard(m.content + ");
+  });
+
+  it("650 ai-chat-saas Copy shows Copied feedback for 1.5 seconds", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("copiedId");
+    expect(template).toContain("setCopiedId");
+    expect(template).toContain("1500");
+    expect(template).toContain("Copied");
+  });
+
+  it("651 ai-chat-saas Copy button has CSS with hover reveal", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain(".copy-btn");
+    expect(template).toContain("opacity: 0");
+    expect(template).toContain(".message-content:hover .copy-btn");
+    expect(template).toContain("opacity: 1");
+  });
+
+  it("652 ai-chat-saas Copy has fallback for clipboard API failure", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("document.execCommand");
+    expect(template).toContain("textarea");
+  });
 });
