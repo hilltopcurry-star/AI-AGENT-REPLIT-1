@@ -345,9 +345,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <span style={{ fontWeight: 700, fontSize: 18, letterSpacing: "-0.02em" }}>VideoGen</span>
               <span style={{ fontSize: 11, fontWeight: 600, background: "var(--accent-glow)", color: "var(--accent2)", padding: "2px 8px", borderRadius: 12, border: "1px solid rgba(99,102,241,0.3)" }}>AI</span>
             </a>
-            <a href="/new" className="btn-primary" data-testid="link-new-project" style={{ fontSize: 13, padding: "8px 18px" }}>
-              + New Project
-            </a>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <a href="/setup" style={{ color: "var(--text2)", textDecoration: "none", fontSize: 13, fontWeight: 500 }} data-testid="link-setup">&#9881; Setup</a>
+              <a href="/new" className="btn-primary" data-testid="link-new-project" style={{ fontSize: 13, padding: "8px 18px" }}>
+                + New Project
+              </a>
+            </div>
           </div>
         </nav>
         <main style={{ minHeight: "calc(100vh - 60px)" }}>
@@ -522,6 +525,150 @@ export default function NewProject() {
 `,
     },
     {
+      path: "app/setup/page.tsx",
+      content: `"use client";
+import { useState, useEffect } from "react";
+export const dynamic = "force-dynamic";
+
+interface ServiceInfo {
+  name: string;
+  key: string;
+  status: string;
+  provider: string;
+  envVar: string;
+  helpUrl: string;
+  description: string;
+}
+interface AIStatus {
+  ready: boolean;
+  demoMode: boolean;
+  videoModel: string;
+  videoStyle: string;
+  services: ServiceInfo[];
+  missing: { name: string; envVar: string; helpUrl: string }[];
+  setupInstructions: string;
+  deployTarget: string;
+}
+
+export default function SetupPage() {
+  const [status, setStatus] = useState<AIStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [checking, setChecking] = useState(false);
+
+  async function checkConfig() {
+    setChecking(true);
+    try {
+      const res = await fetch("/api/ai-status");
+      if (res.ok) setStatus(await res.json());
+    } catch {}
+    setChecking(false);
+    setLoading(false);
+  }
+
+  useEffect(() => { checkConfig(); }, []);
+
+  return (
+    <div style={{ maxWidth: 800, margin: "0 auto", padding: "40px 24px" }} className="fade-in">
+      <div style={{ marginBottom: 32 }}>
+        <a href="/" style={{ color: "var(--text2)", textDecoration: "none", fontSize: 13 }}>&#8592; Back to projects</a>
+      </div>
+      <div style={{ marginBottom: 36 }}>
+        <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 8 }}>Configuration</h1>
+        <p style={{ color: "var(--text2)", fontSize: 15 }}>Check and configure the AI services needed for video generation</p>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: 40 }}>
+          <div style={{ width: 40, height: 40, border: "3px solid var(--border)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 16px" }} />
+          <style>{"@keyframes spin { to { transform: rotate(360deg) } }"}</style>
+          <p style={{ color: "var(--text2)" }}>Checking configuration...</p>
+        </div>
+      ) : status ? (
+        <>
+          <div className="glass-card" style={{ padding: 20, marginBottom: 24, borderColor: status.ready ? "rgba(34,197,94,0.4)" : "rgba(239,68,68,0.4)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, background: status.ready ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)" }}>
+                {status.ready ? "\\u2713" : "\\u2717"}
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 16 }}>
+                  {status.ready ? "All Services Configured" : status.missing.length + " Service" + (status.missing.length > 1 ? "s" : "") + " Need Configuration"}
+                </div>
+                <div style={{ color: "var(--text2)", fontSize: 13 }}>
+                  {status.ready ? "Ready for production video generation" : "Set the required API keys to enable full functionality"}
+                </div>
+              </div>
+            </div>
+            {status.demoMode && !status.ready && (
+              <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(245,158,11,0.1)", borderRadius: 8, fontSize: 13, color: "#fbbf24" }}>
+                &#9888; Running in DEMO mode — videos will show placeholder content instead of AI-generated clips
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "grid", gap: 12, marginBottom: 24 }}>
+            {status.services.map((svc) => (
+              <div key={svc.key} className="glass-card" style={{ padding: 20, borderColor: svc.status === "configured" ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.3)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontWeight: 700, fontSize: 15 }}>{svc.name}</span>
+                    {svc.provider !== "none" && (
+                      <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 12, background: "var(--accent-glow)", color: "var(--accent2)", fontWeight: 600 }}>{svc.provider}</span>
+                    )}
+                  </div>
+                  <span className="status-badge" style={{ background: svc.status === "configured" ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)", color: svc.status === "configured" ? "#4ade80" : "#f87171" }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: svc.status === "configured" ? "#22c55e" : "#ef4444", display: "inline-block" }} />
+                    {svc.status}
+                  </span>
+                </div>
+                <p style={{ color: "var(--text2)", fontSize: 13, marginBottom: 8 }}>{svc.description}</p>
+                {svc.status === "missing" && (
+                  <div style={{ padding: "12px 14px", background: "var(--surface2)", borderRadius: 8, fontSize: 13 }}>
+                    <div style={{ marginBottom: 6 }}>
+                      <span style={{ fontWeight: 600, color: "var(--text)" }}>Required:</span>
+                      <code style={{ marginLeft: 8, padding: "2px 8px", background: "var(--surface)", borderRadius: 4, fontFamily: "monospace", fontSize: 12, color: "var(--accent2)" }}>{svc.envVar}</code>
+                    </div>
+                    <div style={{ marginBottom: 8 }}>
+                      <span style={{ fontWeight: 600, color: "var(--text)" }}>Set via Fly:</span>
+                      <code style={{ display: "block", marginTop: 4, padding: "8px 12px", background: "var(--surface)", borderRadius: 4, fontFamily: "monospace", fontSize: 12, color: "var(--text2)", wordBreak: "break-all" }}>
+                        flyctl secrets set {svc.envVar}=&lt;your-key&gt; -a &lt;app-name&gt;
+                      </code>
+                    </div>
+                    <a href={svc.helpUrl} target="_blank" rel="noopener" style={{ color: "var(--accent2)", fontSize: 13, textDecoration: "none" }}>
+                      &#8594; Get API key
+                    </a>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="glass-card" style={{ padding: 20, marginBottom: 24 }}>
+            <h3 style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Video Configuration</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, fontSize: 13 }}>
+              <div><span style={{ color: "var(--text2)" }}>Model:</span> <span style={{ fontWeight: 500 }}>{status.videoModel}</span></div>
+              <div><span style={{ color: "var(--text2)" }}>Style:</span> <span style={{ fontWeight: 500 }}>{status.videoStyle}</span></div>
+              <div><span style={{ color: "var(--text2)" }}>Deploy target:</span> <span style={{ fontWeight: 500 }}>{status.deployTarget}</span></div>
+              <div><span style={{ color: "var(--text2)" }}>Demo mode:</span> <span style={{ fontWeight: 500 }}>{status.demoMode ? "ON" : "OFF"}</span></div>
+            </div>
+          </div>
+
+          <button onClick={checkConfig} disabled={checking} className="btn-primary" data-testid="button-check-config">
+            {checking ? "Checking..." : "\\u21BB Check Configuration"}
+          </button>
+        </>
+      ) : (
+        <div className="glass-card" style={{ padding: 20 }}>
+          <p style={{ color: "var(--error)" }}>Failed to load configuration status.</p>
+          <button onClick={checkConfig} className="btn-secondary" style={{ marginTop: 12 }}>Retry</button>
+        </div>
+      )}
+    </div>
+  );
+}
+`,
+    },
+    {
       path: "app/project/[id]/page.tsx",
       content: `"use client";
 import { useEffect, useState, useCallback } from "react";
@@ -664,9 +811,12 @@ export default function ProjectPage() {
         <div className="glass-card" style={{ padding: 20, marginBottom: 24, borderColor: "var(--error)", background: "rgba(239,68,68,0.06)" }}>
           <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
             <span style={{ fontSize: 20 }}>&#9888;</span>
-            <div>
-              <h3 style={{ fontWeight: 700, color: "var(--error)", marginBottom: 6, fontSize: 15 }}>Setup Required</h3>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ fontWeight: 700, color: "var(--error)", marginBottom: 6, fontSize: 15 }}>Configuration Required</h3>
               <pre style={{ whiteSpace: "pre-wrap", fontSize: 13, color: "var(--text2)", lineHeight: 1.6 }}>{setupError}</pre>
+              <a href="/setup" className="btn-secondary" style={{ marginTop: 12, fontSize: 13, padding: "8px 16px" }}>
+                &#9881; Open Configuration
+              </a>
             </div>
           </div>
         </div>
@@ -925,14 +1075,65 @@ export async function GET() {
   const replicateToken = process.env.REPLICATE_API_TOKEN;
   const videoModel = process.env.VIDEO_MODEL || "minimax/video-01-live";
   const videoStyle = process.env.VIDEO_STYLE || "photorealistic cinematic";
+  const isDemoMode = process.env.DEV_DEMO === "true";
+
+  const services = [
+    {
+      name: "Script Parser",
+      key: "scriptParser",
+      status: anthropicKey ? "configured" : (openaiKey ? "configured" : "missing"),
+      provider: anthropicKey ? "anthropic" : (openaiKey ? "openai" : "none"),
+      envVar: "ANTHROPIC_API_KEY or OPENAI_API_KEY",
+      helpUrl: "https://console.anthropic.com/settings/keys",
+      description: "Parses scripts into structured scenes with timeline events",
+    },
+    {
+      name: "Video Generator",
+      key: "videoProvider",
+      status: replicateToken ? "configured" : "missing",
+      provider: replicateToken ? "replicate" : "none",
+      envVar: "REPLICATE_API_TOKEN",
+      helpUrl: "https://replicate.com/account/api-tokens",
+      description: "Generates video clips from scene descriptions using " + videoModel,
+    },
+    {
+      name: "Text-to-Speech",
+      key: "tts",
+      status: openaiKey ? "configured" : "missing",
+      provider: openaiKey ? "openai" : "none",
+      envVar: "OPENAI_API_KEY",
+      helpUrl: "https://platform.openai.com/api-keys",
+      description: "Generates voiceover narration and dialogue audio",
+    },
+  ];
+
+  const allConfigured = services.every(s => s.status === "configured");
+  const missingServices = services.filter(s => s.status === "missing");
+
   return NextResponse.json({
-    scriptParser: anthropicKey ? "configured" : (openaiKey ? "configured" : "missing"),
-    scriptParserProvider: anthropicKey ? "anthropic" : (openaiKey ? "openai" : "none"),
-    videoProvider: replicateToken ? "configured" : "missing",
+    scriptParser: services[0].status,
+    scriptParserProvider: services[0].provider,
+    videoProvider: services[1].status,
+    videoProviderName: services[1].provider,
     videoModel,
     videoStyle,
-    tts: openaiKey ? "configured" : "missing",
+    tts: services[2].status,
     realisticMode: true,
+    demoMode: isDemoMode,
+    ready: allConfigured,
+    services,
+    missing: missingServices.map(s => ({
+      name: s.name,
+      envVar: s.envVar,
+      helpUrl: s.helpUrl,
+    })),
+    deployTarget: "fly",
+    setupInstructions: missingServices.length > 0
+      ? "Set the following secrets on your Fly app:\\n" +
+        missingServices.map(s => "  flyctl secrets set " + s.envVar + "=<your-key> -a <your-app-name>").join("\\n") +
+        "\\n\\nGet API keys from:\\n" +
+        missingServices.map(s => "  " + s.name + ": " + s.helpUrl).join("\\n")
+      : "All services configured. Ready for production video generation.",
   });
 }
 `,
@@ -1056,16 +1257,21 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const hasVideoKey = !!process.env.REPLICATE_API_TOKEN;
   const hasAiKey = !!process.env.OPENAI_API_KEY || !!process.env.ANTHROPIC_API_KEY;
   const isDemoMode = process.env.DEV_DEMO === "true";
+
   if (!hasVideoKey && !isDemoMode) {
     return NextResponse.json({
-      error: "PRODUCTION SETUP REQUIRED: REPLICATE_API_TOKEN is not configured. " +
-        "Set it in your environment variables for video generation, or set DEV_DEMO=true for placeholder mode.",
+      error: "PRODUCTION SETUP REQUIRED: REPLICATE_API_TOKEN is not configured. Video generation requires this key.",
       setupRequired: true,
       missing: [
-        !hasVideoKey && "REPLICATE_API_TOKEN",
-        !hasAiKey && "OPENAI_API_KEY or ANTHROPIC_API_KEY",
+        !hasVideoKey && { name: "REPLICATE_API_TOKEN", helpUrl: "https://replicate.com/account/api-tokens", instruction: "flyctl secrets set REPLICATE_API_TOKEN=<token> -a <app>" },
+        !hasAiKey && { name: "OPENAI_API_KEY or ANTHROPIC_API_KEY", helpUrl: "https://platform.openai.com/api-keys", instruction: "flyctl secrets set OPENAI_API_KEY=<key> -a <app>" },
       ].filter(Boolean),
+      configCheckUrl: "/api/ai-status",
     }, { status: 422 });
+  }
+
+  if (!hasVideoKey && isDemoMode) {
+    console.log("[GENERATE] Running in DEV_DEMO mode — placeholder clips will be generated");
   }
 
   await prisma.project.update({ where: { id }, data: { status: "generating" } });
@@ -1073,7 +1279,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     console.error("[PIPELINE] Fatal error:", err);
     await prisma.project.update({ where: { id }, data: { status: "failed" } }).catch(() => {});
   });
-  return NextResponse.json({ ok: true, message: "Pipeline started", mode: isDemoMode ? "demo" : "production" });
+  return NextResponse.json({ ok: true, message: "Pipeline started", mode: isDemoMode && !hasVideoKey ? "demo" : "production" });
 }
 `,
     },

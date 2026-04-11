@@ -481,7 +481,7 @@ primary_region = "${region}"
     const generatedToml = writeFlyToml();
     await logToJob(jobId, "INFO", `[DEPLOY] fly.toml http_service section:\n${generatedToml.split("[http_service]")[1]?.split("[[vm]]")[0] || "(parse failed)"}`);
 
-    const SECRET_KEYS = ["ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "OPENAI_API_KEY"];
+    const SECRET_KEYS = ["ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "OPENAI_API_KEY", "REPLICATE_API_TOKEN"];
     const secretsToSet: Record<string, string> = {};
     for (const key of SECRET_KEYS) {
       const val = process.env[key];
