@@ -1862,12 +1862,12 @@ describe("Regression: ai-video-generator-saas template", () => {
     expect(schema).toContain('@default("[]")');
   });
 
-  it("702 pipeline.ts contains DEV_DEMO production guard", async () => {
+  it("702 pipeline.ts contains DEMO_MODE production guard", async () => {
     const { getTemplate } = await import("../apps/web/lib/templates/index");
     const tmpl = getTemplate("ai-video-generator-saas")!;
     const files = tmpl.getFiles();
     const pipeline = files.find(f => f.path === "lib/pipeline.ts")!.content;
-    expect(pipeline).toContain("DEV_DEMO");
+    expect(pipeline).toContain("DEMO_MODE");
     expect(pipeline).toContain("checkProductionRequirements");
     expect(pipeline).toContain("PRODUCTION SETUP REQUIRED");
     expect(pipeline).toContain("isDemoMode");
@@ -1887,12 +1887,12 @@ describe("Regression: ai-video-generator-saas template", () => {
     expect(parser).toContain("timeline events");
   });
 
-  it("704 generate route returns 422 with setup instructions when keys missing and DEV_DEMO not set", async () => {
+  it("704 generate route returns 422 with setup instructions when keys missing and DEMO_MODE not set", async () => {
     const { getTemplate } = await import("../apps/web/lib/templates/index");
     const tmpl = getTemplate("ai-video-generator-saas")!;
     const files = tmpl.getFiles();
     const genRoute = files.find(f => f.path === "app/api/projects/[id]/generate/route.ts")!.content;
-    expect(genRoute).toContain("DEV_DEMO");
+    expect(genRoute).toContain("DEMO_MODE");
     expect(genRoute).toContain("PRODUCTION SETUP REQUIRED");
     expect(genRoute).toContain("setupRequired");
     expect(genRoute).toContain("422");
@@ -1931,12 +1931,12 @@ describe("Regression: ai-video-generator-saas template", () => {
     expect(detailPage).toContain("Timeline Events");
   });
 
-  it("708 .env includes DEV_DEMO variable", async () => {
+  it("708 .env includes DEMO_MODE variable", async () => {
     const { getTemplate } = await import("../apps/web/lib/templates/index");
     const tmpl = getTemplate("ai-video-generator-saas")!;
     const files = tmpl.getFiles();
     const envFile = files.find(f => f.path === ".env")!.content;
-    expect(envFile).toContain("DEV_DEMO=");
+    expect(envFile).toContain("DEMO_MODE=");
   });
 
   it("709 pipeline reads timelineJson from scene and processes events", async () => {
@@ -1960,7 +1960,7 @@ describe("Regression: ai-video-generator-saas template", () => {
     expect(stitcher).toContain("vol.toFixed");
   });
 
-  it("711 script-parser fallback only runs when DEV_DEMO=true", async () => {
+  it("711 script-parser fallback only runs when DEMO_MODE=true", async () => {
     const { getTemplate } = await import("../apps/web/lib/templates/index");
     const tmpl = getTemplate("ai-video-generator-saas")!;
     const files = tmpl.getFiles();
@@ -1968,6 +1968,6 @@ describe("Regression: ai-video-generator-saas template", () => {
     expect(parser).toContain("isDemoMode");
     expect(parser).toContain("fallbackParse");
     expect(parser).toContain("SETUP REQUIRED");
-    expect(parser).toContain("DEV_DEMO=true");
+    expect(parser).toContain("DEMO_MODE=true");
   });
 });

@@ -152,7 +152,7 @@ OPENAI_API_KEY=""
 REPLICATE_API_TOKEN=""
 VIDEO_MODEL="minimax/video-01-live"
 VIDEO_STYLE="photorealistic cinematic"
-DEV_DEMO=""
+DEMO_MODE=""
 `,
     },
     {
@@ -1061,7 +1061,7 @@ export async function GET() {
     hasReplicateToken: !!process.env.REPLICATE_API_TOKEN,
     hasAnthropicKey: !!process.env.ANTHROPIC_API_KEY,
     hasOpenAiKey: !!process.env.OPENAI_API_KEY,
-    demoMode: process.env.DEV_DEMO === "true",
+    demoMode: process.env.DEMO_MODE === "true",
     routes: ["/", "/new", "/setup", "/project/[id]", "/api/health", "/api/ai-status", "/api/debug"],
   });
 }
@@ -1093,7 +1093,7 @@ export async function GET() {
   const replicateToken = process.env.REPLICATE_API_TOKEN;
   const videoModel = process.env.VIDEO_MODEL || "minimax/video-01-live";
   const videoStyle = process.env.VIDEO_STYLE || "photorealistic cinematic";
-  const isDemoMode = process.env.DEV_DEMO === "true";
+  const isDemoMode = process.env.DEMO_MODE === "true";
 
   const services = [
     {
@@ -1274,7 +1274,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const hasVideoKey = !!process.env.REPLICATE_API_TOKEN;
   const hasAiKey = !!process.env.OPENAI_API_KEY || !!process.env.ANTHROPIC_API_KEY;
-  const isDemoMode = process.env.DEV_DEMO === "true";
+  const isDemoMode = process.env.DEMO_MODE === "true";
 
   if (!hasVideoKey && !isDemoMode) {
     return NextResponse.json({
@@ -1289,7 +1289,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (!hasVideoKey && isDemoMode) {
-    console.log("[GENERATE] Running in DEV_DEMO mode — placeholder clips will be generated");
+    console.log("[GENERATE] Running in DEMO_MODE — placeholder clips will be generated");
   }
 
   await prisma.project.update({ where: { id }, data: { status: "generating" } });
@@ -1400,7 +1400,7 @@ Return ONLY a valid JSON array. No markdown, no explanation.\`;
 export async function parseScript(script: string): Promise<ParsedScene[]> {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
-  const isDemoMode = process.env.DEV_DEMO === "true";
+  const isDemoMode = process.env.DEMO_MODE === "true";
 
   if (!anthropicKey && !openaiKey) {
     if (isDemoMode) {
@@ -1411,7 +1411,7 @@ export async function parseScript(script: string): Promise<ParsedScene[]> {
       "Set one of the following environment variables:\\n" +
       "  - ANTHROPIC_API_KEY (recommended, uses Claude)\\n" +
       "  - OPENAI_API_KEY (uses GPT-4o-mini)\\n" +
-      "Or set DEV_DEMO=true for development placeholder mode."
+      "Or set DEMO_MODE=true for development placeholder mode."
     );
   }
 
@@ -1685,7 +1685,7 @@ export async function processTimelineEvents(
   cumulativeOffset: number
 ): Promise<AudioResult[]> {
   const results: AudioResult[] = [];
-  const isDemoMode = process.env.DEV_DEMO === "true";
+  const isDemoMode = process.env.DEMO_MODE === "true";
   let eventIdx = 0;
 
   for (const event of events) {
@@ -1882,7 +1882,7 @@ const OUTPUT_ROOT = process.env.OUTPUT_DIR || "/tmp/videogen";
 const MAX_CONCURRENT = 2;
 
 function isDemoMode(): boolean {
-  return process.env.DEV_DEMO === "true";
+  return process.env.DEMO_MODE === "true";
 }
 
 function checkProductionRequirements(): void {
@@ -1898,7 +1898,7 @@ function checkProductionRequirements(): void {
       "The following API keys are missing:\\n" +
       missing.map(m => "  - " + m).join("\\n") + "\\n\\n" +
       "To configure production mode, set these environment variables in your deployment.\\n" +
-      "For development/testing only, set DEV_DEMO=true to enable placeholder mode.\\n\\n" +
+      "For development/testing only, set DEMO_MODE=true to enable placeholder mode.\\n\\n" +
       "Documentation: https://docs.videogen.app/setup"
     );
   }
@@ -1930,7 +1930,7 @@ export async function runPipeline(projectId: string): Promise<void> {
   });
 
   try {
-    const mode = isDemoMode() ? "DEV_DEMO" : "PRODUCTION";
+    const mode = isDemoMode() ? "DEMO" : "PRODUCTION";
     await pipeLog(projectId, genJob.id, "generate_clips", "Pipeline mode: " + mode + " | Video provider: " + (isVideoProviderConfigured() ? "Replicate" : "FFmpeg placeholder"));
 
     const scenes = project.scenes;
