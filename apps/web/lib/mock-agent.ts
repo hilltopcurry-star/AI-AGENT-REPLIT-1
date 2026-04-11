@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { detectTemplateKey, getTemplate } from "@/lib/templates";
+import { detectTemplateKeyWithReason, getTemplate } from "@/lib/templates";
 
 export type AgentMode = "Discuss" | "Plan" | "Build" | "Improve" | "Debug";
 
@@ -155,8 +155,11 @@ export async function processMessage(ctx: AgentContext): Promise<{
       const features = planUserMessages[2]?.content || "Not specified";
       const allUserText = chatMessages.filter((m) => m.role === "user").map((m) => m.content).join(" ");
       const combinedPurpose = `${purpose} ${allUserText}`;
-      const templateKey = detectTemplateKey(combinedPurpose, features);
+      const matchResult = detectTemplateKeyWithReason(combinedPurpose, features);
+      const templateKey = matchResult.templateKey;
       const template = templateKey ? getTemplate(templateKey) : undefined;
+      console.log(`[SPEC][mock] Selected templateKey: ${templateKey || "none"}`);
+      console.log(`[SPEC][mock] Selection reason: ${matchResult.reason}`);
 
       const specJson: Record<string, unknown> = {
         purpose,

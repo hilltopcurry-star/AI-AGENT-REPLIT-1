@@ -19,15 +19,18 @@ export interface TemplateDefinition {
   getPackageJson: () => Record<string, unknown>;
 }
 
+export interface TemplateMatchResult {
+  templateKey: string | null;
+  reason: string;
+  scores: { key: string; score: number; threshold: number; matched: string[] }[];
+}
+
 const templateRegistry = new Map<string, TemplateDefinition>();
 
 templateRegistry.set(projectManagementSaasTemplate.key, projectManagementSaasTemplate);
 templateRegistry.set(aiChatSaasTemplate.key, aiChatSaasTemplate);
 
 export function getTemplate(key: string): TemplateDefinition | undefined {
-  if (key === "ai-chat-saas") {
-    return aiChatSaasTemplate;
-  }
   return templateRegistry.get(key);
 }
 
@@ -35,27 +38,63 @@ export function getAllTemplates(): TemplateDefinition[] {
   return Array.from(templateRegistry.values());
 }
 
-export function detectTemplateKey(purpose: string, features: string): string | null {
+export function detectTemplateKeyWithReason(purpose: string, features: string): TemplateMatchResult {
   const combined = `${purpose} ${features}`.toLowerCase();
+  const scores: TemplateMatchResult["scores"] = [];
+  let bestMatch: string | null = null;
+  let bestScore = 0;
+  let bestReason = "";
 
   for (const template of templateRegistry.values()) {
     if (template.key === "ai-chat-saas") {
-      if (!isTemplateEnabled("ai-chat-saas")) continue;
-      const aiKeywordHits = template.keywords.filter((kw) => combined.includes(kw)).length;
+      if (!isTemplateEnabled("ai-chat-saas")) {
+        scores.push({ key: template.key, score: 0, threshold: 2, matched: ["(disabled via ENABLE_AI_CHAT_TEMPLATE)"] });
+        continue;
+      }
+      const matchedKeywords = template.keywords.filter((kw) => combined.includes(kw));
       const uiKeywords = template.uiKeywords || [];
-      const uiKeywordHits = uiKeywords.filter((kw) => combined.includes(kw)).length;
-      if (aiKeywordHits >= 2 && uiKeywordHits >= 1) {
-        return template.key;
+      const matchedUiKeywords = uiKeywords.filter((kw) => combined.includes(kw));
+      const totalScore = matchedKeywords.length + matchedUiKeywords.length;
+      scores.push({
+        key: template.key,
+        score: totalScore,
+        threshold: 3,
+        matched: [...matchedKeywords.map(k => `kw:${k}`), ...matchedUiKeywords.map(k => `ui:${k}`)],
+      });
+      if (matchedKeywords.length >= 2 && matchedUiKeywords.length >= 1) {
+        if (totalScore > bestScore) {
+          bestScore = totalScore;
+          bestMatch = template.key;
+          bestReason = `Matched ${matchedKeywords.length} keywords [${matchedKeywords.join(", ")}] + ${matchedUiKeywords.length} UI keywords [${matchedUiKeywords.join(", ")}]`;
+        }
       }
       continue;
     }
 
-    const matchCount = template.keywords.filter((kw) => combined.includes(kw)).length;
-    if (matchCount >= 2) {
-      return template.key;
+    const matchedKeywords = template.keywords.filter((kw) => combined.includes(kw));
+    scores.push({
+      key: template.key,
+      score: matchedKeywords.length,
+      threshold: 2,
+      matched: matchedKeywords,
+    });
+    if (matchedKeywords.length >= 2 && matchedKeywords.length > bestScore) {
+      bestScore = matchedKeywords.length;
+      bestMatch = template.key;
+      bestReason = `Matched ${matchedKeywords.length} keywords [${matchedKeywords.join(", ")}]`;
     }
   }
-  return null;
+
+  if (!bestMatch) {
+    const availableKeys = Array.from(templateRegistry.keys()).join(", ");
+    bestReason = `No template matched. Available templates: [${availableKeys}]. Scores: ${scores.map(s => `${s.key}=${s.score}/${s.threshold}`).join(", ")}`;
+  }
+
+  return { templateKey: bestMatch, reason: bestReason, scores };
+}
+
+export function detectTemplateKey(purpose: string, features: string): string | null {
+  return detectTemplateKeyWithReason(purpose, features).templateKey;
 }
 
 export function isTemplateEnabled(key: string): boolean {

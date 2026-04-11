@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { setMemory } from "@/lib/memory";
-import { detectTemplateKey, getTemplate } from "@/lib/templates";
+import { detectTemplateKeyWithReason, getTemplate } from "@/lib/templates";
 
 export interface ToolInput {
   [key: string]: unknown;
@@ -48,9 +48,14 @@ const saveProjectSpec: Tool = {
 
     console.log(`[SPEC] detectTemplateKey inputLen=${combinedPurpose.length + combinedFeatures.length} preview="${(combinedPurpose + " " + combinedFeatures).slice(0, 120)}"`);
 
-    const templateKey = detectTemplateKey(combinedPurpose, combinedFeatures);
+    const matchResult = detectTemplateKeyWithReason(combinedPurpose, combinedFeatures);
+    const templateKey = matchResult.templateKey;
 
-    console.log(`[SPEC] detectTemplateKey result=${templateKey || "none"}`);
+    console.log(`[SPEC] Selected templateKey: ${templateKey || "none"}`);
+    console.log(`[SPEC] Selection reason: ${matchResult.reason}`);
+    for (const s of matchResult.scores) {
+      console.log(`[SPEC]   candidate=${s.key} score=${s.score}/${s.threshold} matched=[${s.matched.join(", ")}]`);
+    }
 
     const template = templateKey ? getTemplate(templateKey) : undefined;
 

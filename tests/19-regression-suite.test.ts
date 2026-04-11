@@ -1570,3 +1570,119 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(template).toContain("ONLY the payload inside the block");
   });
 });
+
+describe("Template Routing", () => {
+  it("676 detectTemplateKey returns null for video-generator spec", async () => {
+    const { detectTemplateKey } = await import("../apps/web/lib/templates/index");
+    const result = detectTemplateKey(
+      "AI Script-to-Video Generator that converts text scripts into short videos",
+      "video generation, script input, video rendering, timeline editor, export MP4"
+    );
+    expect(result).toBeNull();
+  });
+
+  it("677 detectTemplateKeyWithReason returns reason for no-match", async () => {
+    const { detectTemplateKeyWithReason } = await import("../apps/web/lib/templates/index");
+    const result = detectTemplateKeyWithReason(
+      "AI Script-to-Video Generator",
+      "video generation, script input, video rendering"
+    );
+    expect(result.templateKey).toBeNull();
+    expect(result.reason).toContain("No template matched");
+    expect(result.scores.length).toBeGreaterThan(0);
+    for (const s of result.scores) {
+      expect(s).toHaveProperty("key");
+      expect(s).toHaveProperty("score");
+      expect(s).toHaveProperty("threshold");
+      expect(s).toHaveProperty("matched");
+    }
+  });
+
+  it("678 detectTemplateKeyWithReason returns reason for ai-chat-saas match", async () => {
+    const origEnv = process.env.ENABLE_AI_CHAT_TEMPLATE;
+    process.env.ENABLE_AI_CHAT_TEMPLATE = "1";
+    try {
+      const { detectTemplateKeyWithReason } = await import("../apps/web/lib/templates/index");
+      const result = detectTemplateKeyWithReason(
+        "AI chatbot web app with conversational interface",
+        "chat, messaging, LLM, sidebar, dark mode"
+      );
+      expect(result.templateKey).toBe("ai-chat-saas");
+      expect(result.reason).toContain("Matched");
+      expect(result.reason).toContain("keywords");
+    } finally {
+      if (origEnv === undefined) delete process.env.ENABLE_AI_CHAT_TEMPLATE;
+      else process.env.ENABLE_AI_CHAT_TEMPLATE = origEnv;
+    }
+  });
+
+  it("679 video-generator spec must NOT get ai-chat-saas even with ENABLE_AI_CHAT_TEMPLATE", async () => {
+    const origEnv = process.env.ENABLE_AI_CHAT_TEMPLATE;
+    process.env.ENABLE_AI_CHAT_TEMPLATE = "1";
+    try {
+      const { detectTemplateKey } = await import("../apps/web/lib/templates/index");
+      const result = detectTemplateKey(
+        "Video generator SaaS that converts scripts to animated videos",
+        "video rendering, animation, timeline, export, script editor, MP4 output"
+      );
+      expect(result).not.toBe("ai-chat-saas");
+    } finally {
+      if (origEnv === undefined) delete process.env.ENABLE_AI_CHAT_TEMPLATE;
+      else process.env.ENABLE_AI_CHAT_TEMPLATE = origEnv;
+    }
+  });
+
+  it("680 getTemplate returns undefined for unknown key (no hardcoded fallback)", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    expect(getTemplate("ai-video-generator-saas")).toBeUndefined();
+    expect(getTemplate("nonexistent-template")).toBeUndefined();
+  });
+
+  it("681 generateScaffold throws for unknown templateKey (no silent fallback)", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("apps/web/lib/job-runner.ts", "utf-8");
+    expect(source).toContain('FATAL: templateKey=');
+    expect(source).toContain('template not found in registry');
+    expect(source).toContain('Failing build');
+  });
+
+  it("682 job-runner fails build when no template matches spec", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("apps/web/lib/job-runner.ts", "utf-8");
+    expect(source).toContain("No template available for this spec");
+    expect(source).toContain('status: "FAILED"');
+  });
+
+  it("683 detectTemplateKeyWithReason scores include all registered templates", async () => {
+    const { detectTemplateKeyWithReason, getAllTemplates } = await import("../apps/web/lib/templates/index");
+    const allTemplates = getAllTemplates();
+    const result = detectTemplateKeyWithReason("generic web app", "user auth, dashboard");
+    expect(result.scores.length).toBe(allTemplates.length);
+    const scoreKeys = result.scores.map(s => s.key);
+    for (const t of allTemplates) {
+      expect(scoreKeys).toContain(t.key);
+    }
+  });
+
+  it("684 template selection logs reason in job-runner", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("apps/web/lib/job-runner.ts", "utf-8");
+    expect(source).toContain("Selected templateKey:");
+    expect(source).toContain("Selection reason:");
+  });
+
+  it("685 template selection logs reason in save_project_spec tool", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("apps/web/lib/tools/index.ts", "utf-8");
+    expect(source).toContain("Selected templateKey:");
+    expect(source).toContain("Selection reason:");
+  });
+
+  it("686 no hardcoded ai-chat-saas override in getTemplate", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("apps/web/lib/templates/index.ts", "utf-8");
+    const getTemplateFn = source.match(/export function getTemplate[\s\S]*?\n\}/)?.[0] || "";
+    expect(getTemplateFn).not.toContain('=== "ai-chat-saas"');
+    expect(getTemplateFn).not.toContain("aiChatSaasTemplate");
+  });
+});
