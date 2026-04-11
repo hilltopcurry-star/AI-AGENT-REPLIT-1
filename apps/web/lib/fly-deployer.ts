@@ -690,8 +690,9 @@ export async function deployToFly(opts: {
   projectId: string;
   jobId: string | null;
   workspacePath: string;
+  forceNewApp?: boolean;
 }): Promise<{ flyDeploymentId: string; status: string; url?: string; error?: string }> {
-  const { queueJobId, userId, projectId, jobId, workspacePath } = opts;
+  const { queueJobId, userId, projectId, jobId, workspacePath, forceNewApp = false } = opts;
 
   const flyReady = await ensureFlyctl(jobId);
   await logToJob(jobId, "INFO", `[DEPLOY] ensureFlyctl: available=${flyReady}`);
@@ -715,7 +716,25 @@ export async function deployToFly(opts: {
     return { flyDeploymentId: flyDeployment.id, status: "FAILED", error };
   }
 
-  const appName = generateAppName(projectId);
+  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { flyAppName: true } });
+  const existingAppName = project?.flyAppName;
+
+  let appName: string;
+  let isInPlaceDeploy = false;
+
+  if (existingAppName && !forceNewApp) {
+    appName = existingAppName;
+    isInPlaceDeploy = true;
+    await logToJob(jobId, "INFO", `[DEPLOY] In-place deploy: reusing existing Fly app '${appName}'`);
+  } else {
+    appName = generateAppName(projectId);
+    if (forceNewApp && existingAppName) {
+      await logToJob(jobId, "INFO", `[DEPLOY] Force new app requested — creating '${appName}' (was '${existingAppName}')`);
+    } else {
+      await logToJob(jobId, "INFO", `[DEPLOY] First deploy — creating new Fly app '${appName}'`);
+    }
+  }
+
   const region = getFlyRegion();
   const org = getFlyOrg();
 
@@ -752,7 +771,7 @@ export async function deployToFly(opts: {
     return { flyDeploymentId: flyDeployment.id, status: "FAILED", error: reason };
   }
 
-  await logToJob(jobId, "INFO", `[DEPLOY] Starting Fly.io deployment for NEW app '${appName}' in region '${region}'`);
+  await logToJob(jobId, "INFO", `[DEPLOY] Starting Fly.io deployment for ${isInPlaceDeploy ? "EXISTING" : "NEW"} app '${appName}' in region '${region}'`);
 
   let dockerContextPath: string;
   try {
@@ -774,14 +793,18 @@ export async function deployToFly(opts: {
     });
   }
 
-  const appCreated = await ensureFlyApp(appName, flyToken, org, jobId);
-  if (!appCreated) {
-    const error = `Failed to create/verify Fly app '${appName}'`;
-    await prisma.flyDeployment.update({
-      where: { id: flyDeployment.id },
-      data: { status: "FAILED", error },
-    });
-    return { flyDeploymentId: flyDeployment.id, status: "FAILED", error };
+  if (!isInPlaceDeploy) {
+    const appCreated = await ensureFlyApp(appName, flyToken, org, jobId);
+    if (!appCreated) {
+      const error = `Failed to create/verify Fly app '${appName}'`;
+      await prisma.flyDeployment.update({
+        where: { id: flyDeployment.id },
+        data: { status: "FAILED", error },
+      });
+      return { flyDeploymentId: flyDeployment.id, status: "FAILED", error };
+    }
+  } else {
+    await logToJob(jobId, "INFO", `[DEPLOY] Skipping app creation — deploying in-place to '${appName}'`);
   }
 
   const deployResult = await deployWithFlyctl(appName, workspacePath, region, jobId);
@@ -789,6 +812,14 @@ export async function deployToFly(opts: {
   if (deployResult.success) {
     const flyUrl = `https://${appName}.fly.dev`;
     await logToJob(jobId, "SUCCESS", `[DEPLOY] Fly deployment succeeded!`);
+
+    if (!existingAppName || forceNewApp) {
+      await prisma.project.update({
+        where: { id: projectId },
+        data: { flyAppName: appName },
+      });
+      await logToJob(jobId, "INFO", `[DEPLOY] Saved flyAppName='${appName}' on Project for future in-place deploys`);
+    }
 
     try {
       const scaleFlyctl = findFlyctlPath();

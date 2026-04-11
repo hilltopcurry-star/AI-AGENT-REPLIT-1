@@ -66,6 +66,7 @@ model Project {
   userId      String
   name        String       @default("New Project")
   specJson    Json?
+  flyAppName  String?
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   chats       Chat[]
   jobs        Job[]

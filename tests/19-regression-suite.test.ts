@@ -1421,4 +1421,56 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(beforeCopyFn).not.toContain("navigator.clipboard");
     expect(beforeCopyFn).not.toContain("document.createElement");
   });
+
+  it("658 Project model has flyAppName field for in-place deploys", async () => {
+    const fs = await import("fs");
+    const schema = fs.readFileSync("apps/web/prisma/schema.prisma", "utf-8");
+    expect(schema).toContain("flyAppName");
+    expect(schema).toContain("String?");
+  });
+
+  it("659 deployToFly accepts forceNewApp option and defaults to false", async () => {
+    const fs = await import("fs");
+    const deployer = fs.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8");
+    expect(deployer).toContain("forceNewApp?: boolean");
+    expect(deployer).toContain("forceNewApp = false");
+  });
+
+  it("660 deployToFly looks up existing flyAppName from Project", async () => {
+    const fs = await import("fs");
+    const deployer = fs.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8");
+    expect(deployer).toContain("project.findUnique");
+    expect(deployer).toContain("flyAppName");
+    expect(deployer).toContain("isInPlaceDeploy");
+  });
+
+  it("661 deployToFly saves flyAppName on Project after first successful deploy", async () => {
+    const fs = await import("fs");
+    const deployer = fs.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8");
+    expect(deployer).toContain("project.update");
+    expect(deployer).toContain("flyAppName: appName");
+    expect(deployer).toContain("Saved flyAppName");
+  });
+
+  it("662 deployToFly skips ensureFlyApp when deploying in-place", async () => {
+    const fs = await import("fs");
+    const deployer = fs.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8");
+    expect(deployer).toContain("if (!isInPlaceDeploy)");
+    expect(deployer).toContain("Skipping app creation");
+    expect(deployer).toContain("deploying in-place");
+  });
+
+  it("663 deployToFly reuses same URL for in-place deploys", async () => {
+    const fs = await import("fs");
+    const deployer = fs.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8");
+    expect(deployer).toContain("In-place deploy: reusing existing Fly app");
+    expect(deployer).toContain("EXISTING");
+  });
+
+  it("664 forceNewApp creates new app even when flyAppName exists", async () => {
+    const fs = await import("fs");
+    const deployer = fs.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8");
+    expect(deployer).toContain("Force new app requested");
+    expect(deployer).toContain("!forceNewApp");
+  });
 });
