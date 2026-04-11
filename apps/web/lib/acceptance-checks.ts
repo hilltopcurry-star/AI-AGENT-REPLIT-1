@@ -552,6 +552,57 @@ async function checkCrud(baseUrl: string): Promise<CheckResult> {
   }
 }
 
+async function checkVideoHomepage(baseUrl: string): Promise<CheckResult> {
+  try {
+    const res = await httpGet(`${baseUrl}/`);
+    if (res.status !== 200) {
+      return { name: "video-homepage", passed: false, detail: `Homepage returned status=${res.status}` };
+    }
+    const body = res.body.toLowerCase();
+    const hasVideoKeyword = body.includes("video") || body.includes("project") || body.includes("generator");
+    const hasTemplateKey = body.includes("ai-video-generator-saas");
+    if (!hasVideoKeyword && !hasTemplateKey) {
+      return { name: "video-homepage", passed: false, detail: "Homepage missing video/project/generator keywords and template-key meta tag" };
+    }
+    return { name: "video-homepage", passed: true, detail: "Homepage contains expected video template content" };
+  } catch (e: any) {
+    return { name: "video-homepage", passed: false, detail: `error: ${e.message}` };
+  }
+}
+
+async function checkVideoProjectCrud(baseUrl: string): Promise<CheckResult> {
+  try {
+    const createRes = await httpPost(`${baseUrl}/api/projects`, {
+      title: "Acceptance Test Video",
+      script: "A rainy night scene. A detective walks through an alley.",
+    });
+    if (createRes.status !== 201 && createRes.status !== 200) {
+      return { name: "video-project-crud", passed: false, detail: `POST /api/projects failed: status=${createRes.status} body=${createRes.body.slice(0, 200)}` };
+    }
+    let projectData: any;
+    try { projectData = JSON.parse(createRes.body); } catch {
+      return { name: "video-project-crud", passed: false, detail: "POST /api/projects returned non-JSON response" };
+    }
+    if (!projectData.id) {
+      return { name: "video-project-crud", passed: false, detail: "POST /api/projects response missing id" };
+    }
+
+    const getRes = await httpGet(`${baseUrl}/api/projects/${projectData.id}`);
+    if (getRes.status !== 200) {
+      return { name: "video-project-crud", passed: false, detail: `GET /api/projects/${projectData.id} returned status=${getRes.status}` };
+    }
+
+    const statusRes = await httpGet(`${baseUrl}/api/projects/${projectData.id}/status`);
+    if (statusRes.status !== 200) {
+      return { name: "video-project-crud", passed: false, detail: `GET /api/projects/${projectData.id}/status returned status=${statusRes.status}` };
+    }
+
+    return { name: "video-project-crud", passed: true, detail: "Created video project, retrieved detail + status API" };
+  } catch (e: any) {
+    return { name: "video-project-crud", passed: false, detail: `error: ${e.message}` };
+  }
+}
+
 export async function runAcceptanceChecks(
   baseUrl: string,
   jobId: string,
@@ -573,7 +624,32 @@ export async function runAcceptanceChecks(
   await logJob(jobId, pageResult.passed ? "SUCCESS" : "ERROR",
     `[ACCEPTANCE] homepage ${pageResult.passed ? "OK" : "FAIL"}: ${pageResult.detail}`);
 
-  if (templateKey === "ai-chat-saas") {
+  if (templateKey === "ai-video-generator-saas") {
+    const dbResult = await checkDbConnection(effectiveUrl);
+    checks.push(dbResult);
+    await logJob(jobId, dbResult.passed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] db-check ${dbResult.passed ? "OK" : "FAIL"}: ${dbResult.detail}`);
+
+    const aiStatusResult = await checkAiStatus(effectiveUrl);
+    checks.push(aiStatusResult);
+    await logJob(jobId, aiStatusResult.passed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] aiStatus ${aiStatusResult.passed ? "OK" : "FAIL"}: ${aiStatusResult.detail}`);
+
+    const videoHomeResult = await checkVideoHomepage(effectiveUrl);
+    checks.push(videoHomeResult);
+    await logJob(jobId, videoHomeResult.passed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] videoHomepage ${videoHomeResult.passed ? "OK" : "FAIL"}: ${videoHomeResult.detail}`);
+
+    const videoCrudResult = await checkVideoProjectCrud(effectiveUrl);
+    checks.push(videoCrudResult);
+    await logJob(jobId, videoCrudResult.passed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] videoProjectCrud ${videoCrudResult.passed ? "OK" : "FAIL"}: ${videoCrudResult.detail}`);
+
+    const summary = `dbCheck:${dbResult.passed ? "OK" : "FAIL"} aiStatus:${aiStatusResult.passed ? "OK" : "FAIL"} videoHome:${videoHomeResult.passed ? "OK" : "FAIL"} videoCrud:${videoCrudResult.passed ? "OK" : "FAIL"}`;
+    const allPassed = dbResult.passed && aiStatusResult.passed && videoHomeResult.passed && videoCrudResult.passed;
+    await logJob(jobId, allPassed ? "SUCCESS" : "ERROR",
+      `[ACCEPTANCE] result=${allPassed ? "PASS" : "FAIL"} checks=${summary}`);
+  } else if (templateKey === "ai-chat-saas") {
     const chatHomeResult = await checkChatHomepage(effectiveUrl, templateKey);
     checks.push(chatHomeResult);
     await logJob(jobId, chatHomeResult.passed ? "SUCCESS" : "ERROR",

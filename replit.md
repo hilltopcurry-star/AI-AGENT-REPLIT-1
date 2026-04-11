@@ -89,6 +89,7 @@ apps/web/
     templates/
       index.ts                    # Template registry + keyword detection (detectTemplateKey, detectTemplateKeyWithReason) — returns match scores + reason; no hardcoded fallback
       ai-chat-saas.ts             # AI Chat SaaS template: streaming chat, file upload, RAG, 10M-char AI Brain
+      ai-video-generator-saas.ts  # AI Video Generator template: script-to-video pipeline, scene breakdown, Replicate video gen, FFmpeg stitching, audio SFX
       project-management-saas.ts  # Full SaaS template: Prisma models, pages, API routes, seed data
     tools/
       index.ts                    # Tool calling (save_project_spec w/ template detection + reason logging, set_memory)

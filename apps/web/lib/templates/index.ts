@@ -1,5 +1,6 @@
 import { projectManagementSaasTemplate } from "./project-management-saas";
 import { aiChatSaasTemplate } from "./ai-chat-saas";
+import { aiVideoGeneratorSaasTemplate } from "./ai-video-generator-saas";
 
 export interface TemplateFile {
   path: string;
@@ -29,6 +30,7 @@ const templateRegistry = new Map<string, TemplateDefinition>();
 
 templateRegistry.set(projectManagementSaasTemplate.key, projectManagementSaasTemplate);
 templateRegistry.set(aiChatSaasTemplate.key, aiChatSaasTemplate);
+templateRegistry.set(aiVideoGeneratorSaasTemplate.key, aiVideoGeneratorSaasTemplate);
 
 export function getTemplate(key: string): TemplateDefinition | undefined {
   return templateRegistry.get(key);

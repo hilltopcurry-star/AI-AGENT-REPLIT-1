@@ -627,6 +627,18 @@ export async function createDockerContext(
       : `CMD ["sh", "-c", "node node_modules/prisma/build/index.js migrate deploy 2>/dev/null || node node_modules/prisma/build/index.js db push --accept-data-loss 2>/dev/null || true; node server.js"]`
     : `CMD ["node", "server.js"]`;
 
+  let extraApkPackages = "";
+  const systemDepsPath = path.join(workspacePath, "system-deps.json");
+  if (fs.existsSync(systemDepsPath)) {
+    try {
+      const deps = JSON.parse(fs.readFileSync(systemDepsPath, "utf-8"));
+      if (deps.apk && Array.isArray(deps.apk) && deps.apk.length > 0) {
+        extraApkPackages = " " + deps.apk.join(" ");
+        await logToJob(jobId, "INFO", `[DEPLOY] Extra system packages from system-deps.json: ${deps.apk.join(", ")}`);
+      }
+    } catch {}
+  }
+
   const dockerfile = `FROM node:20-alpine AS builder
 WORKDIR /app
 RUN apk add --no-cache openssl libc6-compat ca-certificates && update-ca-certificates
@@ -640,7 +652,7 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-RUN apk add --no-cache openssl libc6-compat ca-certificates
+RUN apk add --no-cache openssl libc6-compat ca-certificates${extraApkPackages}
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static

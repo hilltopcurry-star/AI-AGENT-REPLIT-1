@@ -1572,20 +1572,20 @@ describe("AI Chat template (feature-flagged)", () => {
 });
 
 describe("Template Routing", () => {
-  it("676 detectTemplateKey returns null for video-generator spec", async () => {
+  it("676 detectTemplateKey returns ai-video-generator-saas for video spec", async () => {
     const { detectTemplateKey } = await import("../apps/web/lib/templates/index");
     const result = detectTemplateKey(
       "AI Script-to-Video Generator that converts text scripts into short videos",
       "video generation, script input, video rendering, timeline editor, export MP4"
     );
-    expect(result).toBeNull();
+    expect(result).toBe("ai-video-generator-saas");
   });
 
   it("677 detectTemplateKeyWithReason returns reason for no-match", async () => {
     const { detectTemplateKeyWithReason } = await import("../apps/web/lib/templates/index");
     const result = detectTemplateKeyWithReason(
-      "AI Script-to-Video Generator",
-      "video generation, script input, video rendering"
+      "IoT sensor dashboard for agriculture",
+      "humidity readings, soil moisture, temperature alerts"
     );
     expect(result.templateKey).toBeNull();
     expect(result.reason).toContain("No template matched");
@@ -1634,7 +1634,7 @@ describe("Template Routing", () => {
 
   it("680 getTemplate returns undefined for unknown key (no hardcoded fallback)", async () => {
     const { getTemplate } = await import("../apps/web/lib/templates/index");
-    expect(getTemplate("ai-video-generator-saas")).toBeUndefined();
+    expect(getTemplate("nonexistent-template-xyz")).toBeUndefined();
     expect(getTemplate("nonexistent-template")).toBeUndefined();
   });
 
@@ -1684,5 +1684,153 @@ describe("Template Routing", () => {
     const getTemplateFn = source.match(/export function getTemplate[\s\S]*?\n\}/)?.[0] || "";
     expect(getTemplateFn).not.toContain('=== "ai-chat-saas"');
     expect(getTemplateFn).not.toContain("aiChatSaasTemplate");
+  });
+});
+
+describe("Regression: ai-video-generator-saas template", () => {
+  it("687 template is registered in templateRegistry", async () => {
+    const { getTemplate, getAllTemplates } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas");
+    expect(tmpl).toBeDefined();
+    expect(tmpl!.key).toBe("ai-video-generator-saas");
+    const all = getAllTemplates();
+    expect(all.some(t => t.key === "ai-video-generator-saas")).toBe(true);
+  });
+
+  it("688 template has required fields", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    expect(tmpl.name).toBeTruthy();
+    expect(tmpl.description).toBeTruthy();
+    expect(tmpl.keywords.length).toBeGreaterThanOrEqual(5);
+    expect(tmpl.requiredModules).toContain("next");
+    expect(tmpl.requiredModules).toContain("replicate");
+    expect(tmpl.requiredRoutes).toContain("/api/health");
+    expect(tmpl.requiredRoutes).toContain("/api/projects");
+    expect(tmpl.requiredEntities).toContain("Project");
+    expect(tmpl.requiredEntities).toContain("Scene");
+    expect(tmpl.requiredEntities).toContain("PipelineJob");
+  });
+
+  it("689 template generates files with correct paths", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const paths = files.map(f => f.path);
+    expect(paths).toContain("prisma/schema.prisma");
+    expect(paths).toContain("app/layout.tsx");
+    expect(paths).toContain("app/page.tsx");
+    expect(paths).toContain("app/new/page.tsx");
+    expect(paths).toContain("app/api/health/route.ts");
+    expect(paths).toContain("app/api/projects/route.ts");
+    expect(paths).toContain("app/api/projects/[id]/route.ts");
+    expect(paths).toContain("app/api/projects/[id]/parse/route.ts");
+    expect(paths).toContain("app/api/projects/[id]/generate/route.ts");
+    expect(paths).toContain("app/api/projects/[id]/status/route.ts");
+    expect(paths).toContain("app/api/projects/[id]/download/route.ts");
+    expect(paths).toContain("lib/prisma.ts");
+    expect(paths).toContain("lib/script-parser.ts");
+    expect(paths).toContain("lib/video-provider.ts");
+    expect(paths).toContain("lib/audio-provider.ts");
+    expect(paths).toContain("lib/stitcher.ts");
+    expect(paths).toContain("lib/pipeline.ts");
+    expect(paths).toContain("system-deps.json");
+  });
+
+  it("690 template generates valid package.json", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const pkg = tmpl.getPackageJson();
+    expect(pkg.name).toBe("ai-video-generator-saas");
+    expect((pkg.dependencies as any).next).toBeTruthy();
+    expect((pkg.dependencies as any).replicate).toBeTruthy();
+    expect((pkg.dependencies as any)["@prisma/client"]).toBeTruthy();
+    expect((pkg.scripts as any).build).toContain("prisma");
+    expect((pkg.scripts as any).build).toContain("next build");
+  });
+
+  it("691 video template detected from video-related keywords", async () => {
+    const { detectTemplateKeyWithReason } = await import("../apps/web/lib/templates/index");
+    const result1 = detectTemplateKeyWithReason("video generator", "text to video cinematic");
+    expect(result1.templateKey).toBe("ai-video-generator-saas");
+    const result2 = detectTemplateKeyWithReason("script to video app", "scene render mp4");
+    expect(result2.templateKey).toBe("ai-video-generator-saas");
+    const result3 = detectTemplateKeyWithReason("movie maker with ffmpeg", "video editing clips");
+    expect(result3.templateKey).toBe("ai-video-generator-saas");
+  });
+
+  it("692 video template NOT detected from unrelated keywords", async () => {
+    const { detectTemplateKeyWithReason } = await import("../apps/web/lib/templates/index");
+    const result = detectTemplateKeyWithReason("task tracker", "kanban boards sprints");
+    expect(result.templateKey).not.toBe("ai-video-generator-saas");
+  });
+
+  it("693 prisma schema includes all required models", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const schema = files.find(f => f.path === "prisma/schema.prisma")!.content;
+    expect(schema).toContain("model User");
+    expect(schema).toContain("model Project");
+    expect(schema).toContain("model Scene");
+    expect(schema).toContain("model AudioTrack");
+    expect(schema).toContain("model CharacterRef");
+    expect(schema).toContain("model PipelineJob");
+    expect(schema).toContain("model PipelineLog");
+    expect(schema).toContain("sqlite");
+  });
+
+  it("694 system-deps.json includes ffmpeg", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const sysDeps = files.find(f => f.path === "system-deps.json")!;
+    const parsed = JSON.parse(sysDeps.content);
+    expect(parsed.apk).toContain("ffmpeg");
+  });
+
+  it("695 fly-deployer reads system-deps.json for extra apk packages", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8");
+    expect(source).toContain("system-deps.json");
+    expect(source).toContain("extraApkPackages");
+  });
+
+  it("696 template layout has correct template-key meta tag", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const layout = files.find(f => f.path === "app/layout.tsx")!.content;
+    expect(layout).toContain('content="ai-video-generator-saas"');
+    expect(layout).toContain("template-key");
+  });
+
+  it("697 acceptance checks include video template branch", async () => {
+    const fs = await import("fs");
+    const source = fs.readFileSync("apps/web/lib/acceptance-checks.ts", "utf-8");
+    expect(source).toContain("ai-video-generator-saas");
+    expect(source).toContain("checkVideoHomepage");
+    expect(source).toContain("checkVideoProjectCrud");
+  });
+
+  it("698 detectTemplateKeyWithReason scores include video template", async () => {
+    const { detectTemplateKeyWithReason } = await import("../apps/web/lib/templates/index");
+    const result = detectTemplateKeyWithReason("generic web app", "user auth, dashboard");
+    const videoScore = result.scores.find(s => s.key === "ai-video-generator-saas");
+    expect(videoScore).toBeDefined();
+    expect(videoScore!.key).toBe("ai-video-generator-saas");
+  });
+
+  it("699 video template files have data-testid attributes", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const homePage = files.find(f => f.path === "app/page.tsx")!.content;
+    expect(homePage).toContain("data-testid");
+    expect(homePage).toContain("text-page-title");
+    const newPage = files.find(f => f.path === "app/new/page.tsx")!.content;
+    expect(newPage).toContain("data-testid");
+    expect(newPage).toContain("input-title");
+    expect(newPage).toContain("button-create");
   });
 });
