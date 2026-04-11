@@ -1050,6 +1050,24 @@ export async function GET() {
 `,
     },
     {
+      path: "app/api/debug/route.ts",
+      content: `import { NextResponse } from "next/server";
+export const dynamic = "force-dynamic";
+export async function GET() {
+  return NextResponse.json({
+    deployedAt: process.env.DEPLOY_TIMESTAMP || "unknown",
+    commitSha: process.env.DEPLOY_COMMIT_SHA || "unknown",
+    nodeEnv: process.env.NODE_ENV,
+    hasReplicateToken: !!process.env.REPLICATE_API_TOKEN,
+    hasAnthropicKey: !!process.env.ANTHROPIC_API_KEY,
+    hasOpenAiKey: !!process.env.OPENAI_API_KEY,
+    demoMode: process.env.DEV_DEMO === "true",
+    routes: ["/", "/new", "/setup", "/project/[id]", "/api/health", "/api/ai-status", "/api/debug"],
+  });
+}
+`,
+    },
+    {
       path: "app/api/db-check/route.ts",
       content: `import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
