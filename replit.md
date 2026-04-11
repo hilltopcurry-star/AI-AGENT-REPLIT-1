@@ -1,6 +1,6 @@
 # AI Workspace — Phase-Scale-2
 
-## Status: PHASE-SCALE-2 (2026-04-05) — Real Fly.io Deployment + flyctl build-time install + Working App Guarantee (E2E VERIFIED) + Proxy Acceptance Verified
+## Status: PHASE-SCALE-2 (2026-04-09) — Real Fly.io Deployment + Working App Guarantee + 10M-char AI Brain with TF-IDF RAG (7/7 acceptance checks pass)
 
 ## Overview
 AI-powered development workspace built with Next.js App Router. Deterministic mock agent (Phase-1) with optional LLM agent behind `AI_AGENT_MODE` feature flag. Real sandboxed build runner behind `BUILD_RUNNER_MODE` feature flag. Reverse-proxy deployer launches built apps and serves them via proxy routes. 3 workspace tabs (Chat, Console, Database). Google OAuth authentication. All build logs are DB-backed and streamed via SSE. OpenAI cost controls with kill switch, daily caps, and usage tracking. Workspace cleanup with TTL and per-user limits. Build queue system with worker process for scalable builds. Fly.io deployment stub (Phase-Scale-2 for real API). Admin dashboard for monitoring.
@@ -20,7 +20,8 @@ AI-powered development workspace built with Next.js App Router. Deterministic mo
 - **AI**: Agent router (`lib/agent/index.ts`) → mock-agent.ts (default) or llm-agent.ts (when AI_AGENT_MODE=llm)
 - **Build**: Real sandboxed runner (`lib/job-runner.ts`) or mock logs, controlled by `BUILD_RUNNER_MODE`
 - **Deploy**: `deployWorkspace()` attempts Fly.io first when `FLY_API_TOKEN` is set; on Fly success returns Fly URL as primary. Falls back to reverse-proxy deployer (spawns `next start`, proxies via `/api/deployments/{id}/proxy`). Done events include `deploymentProvider` ("fly" or "replit-proxy") and `deploymentId`. `FlyDeployment.queueJobId` is now optional (supports both queue worker and direct job-runner paths). flyctl deploy uses `--depot=false --no-cache` flags to avoid Fly registry push errors. 3 retries with 15s delay on registry errors, then destroy+recreate app as final fallback. Deployer reads workspace `.env` file and resolves relative SQLite `DATABASE_URL` to absolute paths for runtime. Worker wraps Fly deploy in `if (flyTokenPresent)` and falls back to proxy deploy when Fly unavailable.
-- **Acceptance Checks**: After deployment, runs 5 checks (health, homepage, projectsPage, dbCheck, crud) against the live URL. Uses `toLocalProxyUrl()` to convert external proxy URLs to `http://localhost:PORT` for reliable same-container access. 3 retry attempts with increasing delays. Only returns "Live URL (Production)" when all checks pass.
+- **Acceptance Checks**: After deployment, runs 7 checks for ai-chat-saas (health, homepage, chatHomepage, dbCheck, aiStatus, chatCrud, largeInput) against the live URL. Uses `toLocalProxyUrl()` to convert external proxy URLs to `http://localhost:PORT` for reliable same-container access. 3 retry attempts with increasing delays. Only returns "Live URL (Production)" when all checks pass. The largeInput check uploads 10M chars in 10 chunks (1MB each), waits for indexing, runs 3 topic-specific RAG queries (quantum computing, distributed systems, database optimization), verifies each returns substantive response with "Next Steps", plus a new-chat performance check.
+- **Large Input + AI Brain (10M chars)**: Chunked upload system (init → chunk → finalize → status) with adaptive chunk sizes (512KB–2MB). Stores documents as DocumentChunks with TF-IDF keyword extraction, per-chunk summarization, document-level outline, and cached keywords. Chat messages endpoint performs TF-IDF scoring (term frequency × inverse document frequency) with multi-pass retrieval — top-8 chunks normally, expands to top-15 when confidence is low. 16KB context budget per query. Truth policy in system prompt: no fabrication, section citations required, "Next Steps" forced. Stop-word filtering on both indexing and query sides. UI auto-detects pastes >200k chars and uploads via adaptive chunk protocol with progress indicator. DB fields: Upload.outline, Upload.keywords for cached document structure.
 - **Cost Controls**: Kill switch, daily request/token caps, per-request token limit, usage tracking
 - **Cleanup**: TTL-based workspace cleanup, per-user workspace/deployment limits
 - **UI**: Radix UI + Tailwind CSS + shadcn/ui components
@@ -86,10 +87,11 @@ apps/web/
     cleanup.ts                     # Workspace + deployment cleanup (Phase-2.6, TTL, per-user limits)
     memory.ts                      # Memory manager (MemoryItem CRUD with TTL)
     templates/
-      index.ts                    # Template registry + keyword detection (detectTemplateKey)
+      index.ts                    # Template registry + keyword detection (detectTemplateKey, detectTemplateKeyWithReason) — returns match scores + reason; no hardcoded fallback
+      ai-chat-saas.ts             # AI Chat SaaS template: streaming chat, file upload, RAG, 10M-char AI Brain
       project-management-saas.ts  # Full SaaS template: Prisma models, pages, API routes, seed data
     tools/
-      index.ts                    # Tool calling (save_project_spec w/ template detection, set_memory)
+      index.ts                    # Tool calling (save_project_spec w/ template detection + reason logging, set_memory)
   hooks/
     use-toast.ts
     use-mobile.tsx
@@ -233,6 +235,15 @@ package.json
 6. **Mock agent**: `generateBuildLogs()` in `apps/web/lib/mock-agent.ts` produces `[MOCK]` prefixed simulation logs. Delay configurable via `MOCK_LOG_DELAY_MS` env var (default 400ms). Run.sh uses `MOCK_LOG_DELAY_MS=10` for fast test execution.
 7. **Contract**: Mock-agent logs use `[MOCK]` prefix (product behavior). `[RUNNER]`/`[DEPLOY]` patterns are ONLY in `createCompletedJob()` fixtures for test assertions.
 8. **Verified**: 564 tests, 0 failures (Batch 1: 285 DB-only, Batch 2: 279 API).
+
+## Template Routing (2026-04-11)
+
+### Proper Template Selection
+1. **No silent fallback**: When no template matches a spec, the build FAILS with a clear error message ("No template available for this spec") instead of silently deploying a bare scaffold or defaulting to ai-chat-saas.
+2. **`detectTemplateKeyWithReason()`**: New function returns `TemplateMatchResult` with `templateKey`, `reason` (human-readable explanation), and `scores` (per-template: key, score, threshold, matched keywords). Used in spec pipeline, job-runner, and mock-agent.
+3. **Selection reasoning in logs**: Both `save_project_spec` tool and job-runner log: `Selected templateKey: X`, `Selection reason: ...`, and per-candidate scores with matched keywords.
+4. **No hardcoded override**: Removed `if (key === "ai-chat-saas") return aiChatSaasTemplate` special case from `getTemplate()`. All templates go through the registry.
+5. **Tests**: 11 new tests (676–686) covering video-generator rejection, no-match reason, ai-chat-saas match with reason, unknown key handling, no silent fallback, score completeness, and reason logging in job-runner/tools.
 
 ## Phase-5 Changes (2026-03-19)
 

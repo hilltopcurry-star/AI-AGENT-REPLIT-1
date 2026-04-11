@@ -2,7 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import * as fs from "fs";
 import * as path from "path";
 import { spawn, spawnSync, ChildProcess, execSync } from "child_process";
-import { getTemplate, detectTemplateKey } from "../lib/templates";
+import { getTemplate, detectTemplateKeyWithReason } from "../lib/templates";
 import { getSpecLogLines, specHasComplexApp, MIN_FILES_FOR_COMPLEX_APP } from "../lib/spec-logger";
 
 const prisma = new PrismaClient();
@@ -231,8 +231,13 @@ async function processQueueJob(queueJob: {
       const features = (spec.features as string) || "";
       const combinedPurpose = userPrompts ? `${purpose} ${userPrompts}` : purpose;
       await log(jobId, "INFO", `[SPEC] detectTemplateKey inputLen=${combinedPurpose.length + features.length} preview="${(combinedPurpose + " " + features).slice(0, 120)}"`);
-      const detectedKey = detectTemplateKey(combinedPurpose, features);
-      await log(jobId, "INFO", `[SPEC] detectTemplateKey result=${detectedKey || "none"}`);
+      const matchResult = detectTemplateKeyWithReason(combinedPurpose, features);
+      const detectedKey = matchResult.templateKey;
+      await log(jobId, "INFO", `[SPEC] Selected templateKey: ${detectedKey || "none"}`);
+      await log(jobId, "INFO", `[SPEC] Selection reason: ${matchResult.reason}`);
+      for (const s of matchResult.scores) {
+        await log(jobId, "INFO", `[SPEC]   candidate=${s.key} score=${s.score}/${s.threshold} matched=[${s.matched.join(", ")}]`);
+      }
       if (detectedKey) {
         const template = getTemplate(detectedKey);
         if (template) {
@@ -246,6 +251,10 @@ async function processQueueJob(queueJob: {
           });
           await log(jobId, "INFO", `[SPEC] Applied templateKey=${detectedKey} with ${template.requiredRoutes.length} requiredRoutes`);
         }
+      } else {
+        await log(jobId, "ERROR", `[SPEC] ERROR: No template available for this spec. ${matchResult.reason}`);
+        await prisma.job.update({ where: { id: jobId }, data: { status: "FAILED" } });
+        throw new Error(`No template available for this spec. ${matchResult.reason}`);
       }
     } else if (spec?.templateKey) {
       await log(jobId, "INFO", `[SPEC] source=specJson.templateKey (pre-set: ${spec.templateKey})`);
