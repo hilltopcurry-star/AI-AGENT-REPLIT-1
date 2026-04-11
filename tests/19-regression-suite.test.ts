@@ -1380,12 +1380,12 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(template).toContain("textarea");
   });
 
-  it("653 ai-chat-saas system prompt directs to Copy button, no manual copy instructions", async () => {
+  it("653 ai-chat-saas system prompt prohibits manual copy and enables forwarding rules", async () => {
     const fs = await import("fs");
     const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
-    expect(template).toContain("Use the Copy button on this message");
     expect(template).toContain("NEVER suggest manual selection methods");
     expect(template).toContain("click-drag, Ctrl+C, Cmd+C");
+    expect(template).toContain("FORWARDABLE TEXT RULE");
   });
 
   it("654 Dockerfile builder has ca-certificates and build memory settings", async () => {
@@ -1540,5 +1540,33 @@ describe("AI Chat template (feature-flagged)", () => {
     const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
     expect(template).toContain("part.lang.toUpperCase()");
     expect(template).toContain("|| 'TEXT'");
+  });
+
+  it("673 system prompt instructs auto fenced-block for forwardable messages", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("FORWARDABLE TEXT RULE");
+    expect(template).toContain("write, draft, or compose");
+    expect(template).toContain("fenced code block");
+    expect(template).toContain("no surrounding prose");
+    expect(template).toContain("no preamble");
+    expect(template).toContain("TEXT panel");
+  });
+
+  it("674 system prompt lists key forwardable triggers", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("message, email, prompt, letter, text, ticket, bug report");
+    expect(template).toContain("write a message to Replit support");
+    expect(template).toContain("draft an email");
+    expect(template).toContain("compose a prompt");
+  });
+
+  it("675 system prompt specifies text label for fenced blocks", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("triple-backtick markers");
+    expect(template).toContain("label 'text'");
+    expect(template).toContain("ONLY the payload inside the block");
   });
 });
