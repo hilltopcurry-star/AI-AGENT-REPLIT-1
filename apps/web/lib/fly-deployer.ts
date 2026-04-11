@@ -629,16 +629,18 @@ export async function createDockerContext(
 
   const dockerfile = `FROM node:20-alpine AS builder
 WORKDIR /app
-RUN apk add --no-cache openssl libc6-compat
+RUN apk add --no-cache openssl libc6-compat ca-certificates && update-ca-certificates
 COPY package.json package-lock.json* ./
 RUN npm ci --no-audit --no-fund
 COPY . .
+ENV NODE_OPTIONS="--max-old-space-size=2048"
+ENV NEXT_PRIVATE_WORKER_THREADS=0
 RUN npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-RUN apk add --no-cache openssl libc6-compat
+RUN apk add --no-cache openssl libc6-compat ca-certificates
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static

@@ -1387,7 +1387,30 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(template).toContain("click-drag, Ctrl+C, Cmd+C");
   });
 
-  it("654 ai-chat-saas clipboard logic is SSR-safe with browser guard", async () => {
+  it("654 Dockerfile builder has ca-certificates and build memory settings", async () => {
+    const fs = await import("fs");
+    const deployer = fs.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8");
+    expect(deployer).toContain("ca-certificates");
+    expect(deployer).toContain("update-ca-certificates");
+    expect(deployer).toContain("--max-old-space-size=2048");
+    expect(deployer).toContain("NEXT_PRIVATE_WORKER_THREADS=0");
+  });
+
+  it("655 ai-chat-saas template includes .nvmrc pinning Node 20", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain('path: ".nvmrc"');
+    expect(template).toContain("20");
+  });
+
+  it("656 ai-chat-saas main page is force-dynamic to skip static generation", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("export const dynamic = 'force-dynamic'");
+    expect(template).toContain("nextDynamic");
+  });
+
+  it("657 ai-chat-saas clipboard logic is SSR-safe with browser guard", async () => {
     const fs = await import("fs");
     const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
     expect(template).toContain("typeof window !== 'undefined'");

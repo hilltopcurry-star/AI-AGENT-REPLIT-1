@@ -85,6 +85,11 @@ module.exports = nextConfig;
 `,
     },
     {
+      path: ".nvmrc",
+      content: `20
+`,
+    },
+    {
       path: "tsconfig.json",
       content: JSON.stringify(
         {
@@ -757,9 +762,11 @@ export default function ChatApp() {
     },
     {
       path: "app/page.tsx",
-      content: `import dynamic from 'next/dynamic';
+      content: `import nextDynamic from 'next/dynamic';
 
-const ChatApp = dynamic(() => import('./ChatApp'), { ssr: false });
+export const dynamic = 'force-dynamic';
+
+const ChatApp = nextDynamic(() => import('./ChatApp'), { ssr: false });
 
 export default function Page() {
   return <ChatApp />;
