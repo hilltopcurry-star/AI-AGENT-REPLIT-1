@@ -49,6 +49,7 @@ model Scene {
   cameraCue     String
   mood          String
   duration      Float    @default(5.0)
+  timelineJson  String   @default("[]")
   clipUrl       String?
   status        String   @default("pending")
   error         String?
@@ -151,6 +152,7 @@ OPENAI_API_KEY=""
 REPLICATE_API_TOKEN=""
 VIDEO_MODEL="minimax/video-01-live"
 VIDEO_STYLE="photorealistic cinematic"
+DEV_DEMO=""
 `,
     },
     {
@@ -346,10 +348,14 @@ export default function NewProject() {
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 
+interface TimelineEventUI {
+  type: string; startTime: number; duration: number; content: string;
+  speaker?: string; voice?: string; volume?: number;
+}
 interface Scene {
   id: string; index: number; description: string; environment: string;
   characters: string; actions: string; cameraCue: string; mood: string;
-  duration: number; clipUrl: string | null; status: string; error: string | null;
+  duration: number; timelineJson: string; clipUrl: string | null; status: string; error: string | null;
 }
 interface ProjectData {
   id: string; title: string; script: string; status: string;
@@ -461,10 +467,30 @@ export default function ProjectPage() {
                 <div style={{ fontSize: 13, color: "#9999aa", lineHeight: 1.5 }}>
                   <div><strong>Environment:</strong> {scene.environment}</div>
                   <div><strong>Characters:</strong> {scene.characters}</div>
-                  <div><strong>Actions:</strong> {scene.actions}</div>
                   <div><strong>Camera:</strong> {scene.cameraCue}</div>
                   <div><strong>Mood:</strong> {scene.mood}</div>
                   <div><strong>Duration:</strong> {scene.duration}s</div>
+                  {(() => {
+                    let events: TimelineEventUI[] = [];
+                    try { events = JSON.parse(scene.timelineJson || "[]"); } catch {}
+                    if (events.length === 0) return null;
+                    return (
+                      <div style={{ marginTop: 8 }} data-testid={"timeline-scene-" + scene.index}>
+                        <strong>Timeline Events ({events.length}):</strong>
+                        <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
+                          {events.map((ev: TimelineEventUI, j: number) => (
+                            <div key={j} style={{ display: "flex", gap: 8, alignItems: "center", background: "#1c1c27", borderRadius: 6, padding: "4px 8px", fontSize: 12 }}>
+                              <span style={{ fontWeight: 600, color: ev.type === "dialogue" ? "#818cf8" : ev.type === "narration" ? "#22c55e" : ev.type === "sfx" ? "#f59e0b" : ev.type === "music" ? "#ec4899" : "#6366f1", minWidth: 80 }}>
+                                {ev.type}
+                              </span>
+                              <span style={{ color: "#666" }}>{ev.startTime.toFixed(1)}s-{(ev.startTime + ev.duration).toFixed(1)}s</span>
+                              <span style={{ flex: 1 }}>{ev.speaker ? ev.speaker + ": " : ""}{ev.content.slice(0, 80)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {scene.error && <div style={{ color: "#ef4444", marginTop: 4 }}>{scene.error}</div>}
                   {scene.clipUrl && (
                     <video controls style={{ width: "100%", marginTop: 8, borderRadius: 8 }} src={scene.clipUrl} />
@@ -516,6 +542,84 @@ export default function ProjectPage() {
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 export const prisma = globalForPrisma.prisma || new PrismaClient();
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+`,
+    },
+    {
+      path: "lib/scene-contract.ts",
+      content: `export interface TimelineEvent {
+  type: "dialogue" | "narration" | "sfx" | "music" | "camera_move";
+  startTime: number;
+  duration: number;
+  content: string;
+  speaker?: string;
+  voice?: string;
+  volume?: number;
+  transition?: string;
+}
+
+export interface SceneSpec {
+  index: number;
+  description: string;
+  environment: string;
+  characters: string[];
+  duration: number;
+  events: TimelineEvent[];
+  cameraCue: string;
+  mood: string;
+}
+
+export interface ProjectSpec {
+  title: string;
+  totalDuration: number;
+  scenes: SceneSpec[];
+}
+
+export function validateTimelineEvents(events: any[]): TimelineEvent[] {
+  const validTypes = ["dialogue", "narration", "sfx", "music", "camera_move"];
+  return (events || []).filter((e: any) => {
+    if (!e || typeof e !== "object") return false;
+    if (!validTypes.includes(e.type)) return false;
+    if (typeof e.startTime !== "number" || typeof e.duration !== "number") return false;
+    if (!e.content || typeof e.content !== "string") return false;
+    return true;
+  }).map((e: any) => ({
+    type: e.type,
+    startTime: Math.max(0, Number(e.startTime) || 0),
+    duration: Math.max(0.1, Number(e.duration) || 1),
+    content: String(e.content),
+    speaker: e.speaker ? String(e.speaker) : undefined,
+    voice: e.voice ? String(e.voice) : undefined,
+    volume: typeof e.volume === "number" ? Math.max(0, Math.min(1, e.volume)) : undefined,
+    transition: e.transition ? String(e.transition) : undefined,
+  }));
+}
+
+export function sceneSpecToLegacy(spec: SceneSpec): {
+  description: string; environment: string; characters: string;
+  actions: string; cameraCue: string; mood: string; duration: number;
+} {
+  const dialogueActions = spec.events
+    .filter(e => e.type === "dialogue" || e.type === "narration")
+    .map(e => (e.speaker ? e.speaker + ": " : "") + e.content)
+    .join("; ");
+  return {
+    description: spec.description,
+    environment: spec.environment,
+    characters: spec.characters.join(", "),
+    actions: dialogueActions || spec.description,
+    cameraCue: spec.cameraCue,
+    mood: spec.mood,
+    duration: spec.duration,
+  };
+}
+
+export function computeSceneDuration(events: TimelineEvent[]): number {
+  if (events.length === 0) return 5;
+  return Math.max(
+    5,
+    ...events.map(e => e.startTime + e.duration)
+  );
+}
 `,
     },
     {
@@ -650,6 +754,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
           environment: s.environment, characters: s.characters,
           actions: s.actions, cameraCue: s.cameraCue, mood: s.mood,
           duration: s.duration || 5.0,
+          timelineJson: JSON.stringify(s.events || []),
         },
       });
     }
@@ -679,12 +784,28 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   if (project.scenes.length === 0) {
     return NextResponse.json({ error: "No scenes to generate" }, { status: 400 });
   }
+
+  const hasVideoKey = !!process.env.REPLICATE_API_TOKEN;
+  const hasAiKey = !!process.env.OPENAI_API_KEY || !!process.env.ANTHROPIC_API_KEY;
+  const isDemoMode = process.env.DEV_DEMO === "true";
+  if (!hasVideoKey && !isDemoMode) {
+    return NextResponse.json({
+      error: "PRODUCTION SETUP REQUIRED: REPLICATE_API_TOKEN is not configured. " +
+        "Set it in your environment variables for video generation, or set DEV_DEMO=true for placeholder mode.",
+      setupRequired: true,
+      missing: [
+        !hasVideoKey && "REPLICATE_API_TOKEN",
+        !hasAiKey && "OPENAI_API_KEY or ANTHROPIC_API_KEY",
+      ].filter(Boolean),
+    }, { status: 422 });
+  }
+
   await prisma.project.update({ where: { id }, data: { status: "generating" } });
   runPipeline(id).catch(async (err) => {
     console.error("[PIPELINE] Fatal error:", err);
     await prisma.project.update({ where: { id }, data: { status: "failed" } }).catch(() => {});
   });
-  return NextResponse.json({ ok: true, message: "Pipeline started" });
+  return NextResponse.json({ ok: true, message: "Pipeline started", mode: isDemoMode ? "demo" : "production" });
 }
 `,
     },
@@ -751,7 +872,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     },
     {
       path: "lib/script-parser.ts",
-      content: `export interface ParsedScene {
+      content: `import type { SceneSpec, TimelineEvent } from "./scene-contract";
+import { validateTimelineEvents, computeSceneDuration } from "./scene-contract";
+
+export interface ParsedScene {
   description: string;
   environment: string;
   characters: string;
@@ -759,16 +883,47 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   cameraCue: string;
   mood: string;
   duration: number;
+  events: TimelineEvent[];
 }
+
+const STRUCTURED_SYSTEM_PROMPT = \`You are a professional film script analyst. Parse the given script into individual scenes with structured timeline events.
+
+For each scene, produce a JSON object with:
+- description: 1-2 sentence summary
+- environment: location, weather, time of day
+- characters: array of character names present
+- cameraCue: camera movement/angle (e.g. "wide establishing shot", "close-up tracking")
+- mood: lighting and emotional tone
+- events: array of timeline events, each with:
+  - type: one of "dialogue", "narration", "sfx", "music", "camera_move"
+  - startTime: seconds from scene start
+  - duration: seconds this event lasts
+  - content: the text (for dialogue/narration), sound name (for sfx), track description (for music), or movement description (for camera_move)
+  - speaker: (dialogue only) character name
+  - voice: (dialogue/narration) voice style hint e.g. "deep", "whisper"
+  - volume: 0.0-1.0, default 0.7
+
+Return ONLY a valid JSON array. No markdown, no explanation.\`;
 
 export async function parseScript(script: string): Promise<ParsedScene[]> {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
+  const isDemoMode = process.env.DEV_DEMO === "true";
 
-  const systemPrompt = "You are a professional film script analyst. Parse the given script into individual scenes. For each scene, extract: description (1-2 sentence summary), environment (weather, location, time of day), characters (who appears), actions (what happens), cameraCue (camera movement/angle), mood (lighting and emotional tone), duration (estimated seconds, 4-10s per scene). Return ONLY a valid JSON array of scene objects with exactly these keys: description, environment, characters, actions, cameraCue, mood, duration. No markdown, no explanation, just the JSON array.";
+  if (!anthropicKey && !openaiKey) {
+    if (isDemoMode) {
+      return fallbackParse(script);
+    }
+    throw new Error(
+      "SETUP REQUIRED: No AI provider configured for script parsing.\\n" +
+      "Set one of the following environment variables:\\n" +
+      "  - ANTHROPIC_API_KEY (recommended, uses Claude)\\n" +
+      "  - OPENAI_API_KEY (uses GPT-4o-mini)\\n" +
+      "Or set DEV_DEMO=true for development placeholder mode."
+    );
+  }
 
-  const userPrompt = "Parse this script into scenes:\\n\\n" + script;
-
+  const userPrompt = "Parse this script into scenes with timeline events:\\n\\n" + script;
   let responseText = "";
 
   if (anthropicKey) {
@@ -781,8 +936,8 @@ export async function parseScript(script: string): Promise<ParsedScene[]> {
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
-        max_tokens: 4096,
-        system: systemPrompt,
+        max_tokens: 8192,
+        system: STRUCTURED_SYSTEM_PROMPT,
         messages: [{ role: "user", content: userPrompt }],
       }),
     });
@@ -795,32 +950,60 @@ export async function parseScript(script: string): Promise<ParsedScene[]> {
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + openaiKey },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
-        max_tokens: 4096,
+        messages: [{ role: "system", content: STRUCTURED_SYSTEM_PROMPT }, { role: "user", content: userPrompt }],
+        max_tokens: 8192,
       }),
     });
     if (!res.ok) throw new Error("OpenAI API error: " + res.status);
     const data = await res.json();
     responseText = data.choices?.[0]?.message?.content || "";
-  } else {
-    throw new Error("No AI provider configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.");
   }
 
   const jsonMatch = responseText.match(/\\[\\s*\\{[\\s\\S]*\\}\\s*\\]/);
   if (!jsonMatch) throw new Error("Failed to parse AI response as JSON scene array. Response: " + responseText.slice(0, 300));
 
-  const scenes: ParsedScene[] = JSON.parse(jsonMatch[0]);
-  if (!Array.isArray(scenes) || scenes.length === 0) throw new Error("Parsed 0 scenes from script");
+  const raw: any[] = JSON.parse(jsonMatch[0]);
+  if (!Array.isArray(raw) || raw.length === 0) throw new Error("Parsed 0 scenes from script");
 
-  return scenes.map((s: any) => ({
-    description: String(s.description || ""),
-    environment: String(s.environment || ""),
-    characters: String(s.characters || ""),
-    actions: String(s.actions || ""),
-    cameraCue: String(s.cameraCue || s.camera_cue || "static"),
-    mood: String(s.mood || "neutral"),
-    duration: Number(s.duration) || 5,
-  }));
+  return raw.map((s: any, i: number) => {
+    const events = validateTimelineEvents(s.events || []);
+    const duration = events.length > 0 ? computeSceneDuration(events) : (Number(s.duration) || 5);
+    return {
+      description: String(s.description || ""),
+      environment: String(s.environment || ""),
+      characters: Array.isArray(s.characters) ? s.characters.join(", ") : String(s.characters || ""),
+      actions: String(s.actions || s.description || ""),
+      cameraCue: String(s.cameraCue || s.camera_cue || "static"),
+      mood: String(s.mood || "neutral"),
+      duration,
+      events,
+    };
+  });
+}
+
+function fallbackParse(script: string): ParsedScene[] {
+  const blocks = script.split(/\\n\\s*\\n|(?=Scene\\s+\\d)/i).filter(b => b.trim().length > 10);
+  if (blocks.length === 0) blocks.push(script);
+
+  return blocks.map((block, i) => {
+    const text = block.trim();
+    const events: TimelineEvent[] = [
+      { type: "narration", startTime: 0, duration: Math.min(text.length / 20, 8), content: text.slice(0, 200), volume: 0.7 },
+    ];
+    if (text.toLowerCase().includes("rain") || text.toLowerCase().includes("storm")) {
+      events.push({ type: "sfx", startTime: 0, duration: 5, content: "rain", volume: 0.4 });
+    }
+    return {
+      description: text.slice(0, 120),
+      environment: "unspecified",
+      characters: "",
+      actions: text.slice(0, 200),
+      cameraCue: "static",
+      mood: "neutral",
+      duration: computeSceneDuration(events),
+      events,
+    };
+  });
 }
 `,
     },
@@ -924,23 +1107,27 @@ export function getProviderLimits(): { maxClipSeconds: number; maxTotalMinutes: 
       content: `import * as fs from "fs";
 import * as path from "path";
 import { execSync } from "child_process";
+import type { TimelineEvent } from "./scene-contract";
 
 export interface AudioResult {
   filePath: string;
   durationSec: number;
+  startTime: number;
+  eventType: string;
 }
 
-export async function generateNarration(text: string, outputDir: string, label: string): Promise<AudioResult> {
+export async function generateNarration(text: string, outputDir: string, label: string, voice?: string): Promise<Omit<AudioResult, "startTime" | "eventType">> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY not configured for TTS");
 
+  const ttsVoice = voice === "whisper" ? "shimmer" : voice === "deep" ? "onyx" : "alloy";
   const res = await fetch("https://api.openai.com/v1/audio/speech", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
     body: JSON.stringify({
       model: "tts-1",
       input: text,
-      voice: "onyx",
+      voice: ttsVoice,
       response_format: "mp3",
     }),
   });
@@ -963,7 +1150,7 @@ export async function generateNarration(text: string, outputDir: string, label: 
   return { filePath, durationSec: duration };
 }
 
-export async function generateSFX(type: string, durationSec: number, outputDir: string, label: string): Promise<AudioResult> {
+export async function generateSFX(type: string, durationSec: number, outputDir: string, label: string): Promise<Omit<AudioResult, "startTime" | "eventType">> {
   const filePath = path.join(outputDir, label + ".wav");
   let cmd = "";
 
@@ -976,6 +1163,13 @@ export async function generateSFX(type: string, durationSec: number, outputDir: 
       break;
     case "footsteps":
       cmd = "ffmpeg -y -f lavfi -i sine=frequency=200:duration=" + durationSec + " -af 'tremolo=f=4:d=0.9,lowpass=f=800' " + JSON.stringify(filePath);
+      break;
+    case "wind":
+      cmd = "ffmpeg -y -f lavfi -i anoisesrc=d=" + durationSec + ":c=brown:r=44100:a=0.2 -af 'lowpass=f=1500,highpass=f=200' " + JSON.stringify(filePath);
+      break;
+    case "ocean":
+    case "waves":
+      cmd = "ffmpeg -y -f lavfi -i anoisesrc=d=" + durationSec + ":c=pink:r=44100:a=0.25 -af 'lowpass=f=2000,tremolo=f=0.15:d=0.6' " + JSON.stringify(filePath);
       break;
     default:
       cmd = "ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=mono -t " + durationSec + " " + JSON.stringify(filePath);
@@ -992,11 +1186,76 @@ export async function generateSFX(type: string, durationSec: number, outputDir: 
   return { filePath, durationSec };
 }
 
+export async function processTimelineEvents(
+  events: TimelineEvent[],
+  sceneIndex: number,
+  outputDir: string,
+  cumulativeOffset: number
+): Promise<AudioResult[]> {
+  const results: AudioResult[] = [];
+  const isDemoMode = process.env.DEV_DEMO === "true";
+  let eventIdx = 0;
+
+  for (const event of events) {
+    const label = "scene" + sceneIndex + "_ev" + eventIdx + "_" + event.type;
+    try {
+      switch (event.type) {
+        case "dialogue":
+        case "narration": {
+          if (!process.env.OPENAI_API_KEY) {
+            if (!isDemoMode) {
+              console.log("[AUDIO] Skipping " + event.type + " — OPENAI_API_KEY not set");
+              break;
+            }
+            const silentPath = path.join(outputDir, label + ".wav");
+            execSync("ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=mono -t " + event.duration + " " + JSON.stringify(silentPath),
+              { encoding: "utf-8", timeout: 10000, stdio: "pipe" });
+            results.push({ filePath: silentPath, durationSec: event.duration, startTime: cumulativeOffset + event.startTime, eventType: event.type });
+            break;
+          }
+          const narr = await generateNarration(event.content, outputDir, label, event.voice);
+          results.push({ filePath: narr.filePath, durationSec: narr.durationSec, startTime: cumulativeOffset + event.startTime, eventType: event.type });
+          break;
+        }
+        case "sfx": {
+          const sfx = await generateSFX(event.content, event.duration, outputDir, label);
+          results.push({ filePath: sfx.filePath, durationSec: sfx.durationSec, startTime: cumulativeOffset + event.startTime, eventType: event.type });
+          break;
+        }
+        case "music": {
+          const musicPath = path.join(outputDir, label + ".wav");
+          const freq = event.content.toLowerCase().includes("tense") ? 220 : event.content.toLowerCase().includes("upbeat") ? 440 : 330;
+          try {
+            execSync(
+              "ffmpeg -y -f lavfi -i sine=frequency=" + freq + ":duration=" + event.duration + " -af 'volume=0.15,lowpass=f=2000' " + JSON.stringify(musicPath),
+              { encoding: "utf-8", timeout: 30000, stdio: "pipe" }
+            );
+          } catch {
+            execSync("ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=mono -t " + event.duration + " " + JSON.stringify(musicPath),
+              { encoding: "utf-8", timeout: 10000, stdio: "pipe" });
+          }
+          results.push({ filePath: musicPath, durationSec: event.duration, startTime: cumulativeOffset + event.startTime, eventType: "music" });
+          break;
+        }
+        case "camera_move":
+          break;
+      }
+    } catch (err: any) {
+      console.log("[AUDIO] Event " + label + " failed: " + err.message?.slice(0, 200));
+    }
+    eventIdx++;
+  }
+
+  return results;
+}
+
 export function detectSFXTypes(environment: string, actions: string): string[] {
   const text = (environment + " " + actions).toLowerCase();
   const sfx: string[] = [];
   if (text.includes("rain")) sfx.push("rain");
   if (text.includes("thunder") || text.includes("lightning") || text.includes("storm")) sfx.push("thunder");
+  if (text.includes("wind") || text.includes("breeze")) sfx.push("wind");
+  if (text.includes("ocean") || text.includes("waves") || text.includes("sea")) sfx.push("ocean");
   if (text.includes("footstep") || text.includes("running") || text.includes("walking") || text.includes("run") || text.includes("walk")) sfx.push("footsteps");
   return sfx;
 }
@@ -1007,10 +1266,11 @@ export function detectSFXTypes(environment: string, actions: string): string[] {
       content: `import * as fs from "fs";
 import * as path from "path";
 import { execSync } from "child_process";
+import type { AudioResult } from "./audio-provider";
 
 export interface StitchInput {
   clipPath: string;
-  audioTracks: { path: string; startTime: number }[];
+  audioTracks: { path: string; startTime: number; volume?: number }[];
   duration: number;
 }
 
@@ -1047,8 +1307,9 @@ export async function stitchVideo(
     let filterComplex = "";
     const audioInputs: string[] = [];
     for (let i = 0; i < allAudio.length; i++) {
+      const vol = allAudio[i].volume ?? 0.5;
       audioInputs.push("-i " + JSON.stringify(allAudio[i].path));
-      filterComplex += "[" + (i + 1) + ":a]adelay=" + Math.round(allAudio[i].startTime * 1000) + "|" + Math.round(allAudio[i].startTime * 1000) + ",volume=0.5[a" + i + "];";
+      filterComplex += "[" + (i + 1) + ":a]adelay=" + Math.round(allAudio[i].startTime * 1000) + "|" + Math.round(allAudio[i].startTime * 1000) + ",volume=" + vol.toFixed(2) + "[a" + i + "];";
     }
     const mixInputs = allAudio.map((_, i) => "[a" + i + "]").join("");
     filterComplex += mixInputs + "amix=inputs=" + allAudio.length + ":duration=longest[aout]";
@@ -1090,21 +1351,50 @@ export function downloadFile(url: string, destPath: string): Promise<void> {
       path: "lib/pipeline.ts",
       content: `import { prisma } from "./prisma";
 import { generateVideoClip, isVideoProviderConfigured } from "./video-provider";
-import { generateNarration, generateSFX, detectSFXTypes } from "./audio-provider";
+import { processTimelineEvents, generateSFX, detectSFXTypes } from "./audio-provider";
+import type { AudioResult } from "./audio-provider";
+import { validateTimelineEvents } from "./scene-contract";
+import type { TimelineEvent } from "./scene-contract";
 import { stitchVideo, downloadFile } from "./stitcher";
 import type { StitchInput } from "./stitcher";
 import * as fs from "fs";
 import * as path from "path";
+import { execSync } from "child_process";
 
 const OUTPUT_ROOT = process.env.OUTPUT_DIR || "/tmp/videogen";
 const MAX_CONCURRENT = 2;
 
-async function pipeLog(projectId: string, jobId: string, stage: string, msg: string) {
+function isDemoMode(): boolean {
+  return process.env.DEV_DEMO === "true";
+}
+
+function checkProductionRequirements(): void {
+  const missing: string[] = [];
+  if (!process.env.REPLICATE_API_TOKEN) missing.push("REPLICATE_API_TOKEN (video generation via Replicate)");
+  if (!process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
+    missing.push("OPENAI_API_KEY or ANTHROPIC_API_KEY (script parsing)");
+  }
+
+  if (missing.length > 0 && !isDemoMode()) {
+    throw new Error(
+      "PRODUCTION SETUP REQUIRED\\n" +
+      "The following API keys are missing:\\n" +
+      missing.map(m => "  - " + m).join("\\n") + "\\n\\n" +
+      "To configure production mode, set these environment variables in your deployment.\\n" +
+      "For development/testing only, set DEV_DEMO=true to enable placeholder mode.\\n\\n" +
+      "Documentation: https://docs.videogen.app/setup"
+    );
+  }
+}
+
+async function pipeLog(projectId: string, jobId: string, stage: string, msg: string, level?: string) {
   console.log("[PIPELINE][" + stage + "] " + msg);
-  await prisma.pipelineLog.create({ data: { jobId, level: "INFO", message: "[" + stage + "] " + msg } }).catch(() => {});
+  await prisma.pipelineLog.create({ data: { jobId, level: level || "INFO", message: "[" + stage + "] " + msg } }).catch(() => {});
 }
 
 export async function runPipeline(projectId: string): Promise<void> {
+  checkProductionRequirements();
+
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     include: { scenes: { orderBy: { index: "asc" } } },
@@ -1123,9 +1413,8 @@ export async function runPipeline(projectId: string): Promise<void> {
   });
 
   try {
-    if (!isVideoProviderConfigured()) {
-      await pipeLog(projectId, genJob.id, "generate_clips", "REPLICATE_API_TOKEN not set — generating placeholder clips with FFmpeg");
-    }
+    const mode = isDemoMode() ? "DEV_DEMO" : "PRODUCTION";
+    await pipeLog(projectId, genJob.id, "generate_clips", "Pipeline mode: " + mode + " | Video provider: " + (isVideoProviderConfigured() ? "Replicate" : "FFmpeg placeholder"));
 
     const scenes = project.scenes;
     for (let i = 0; i < scenes.length; i += MAX_CONCURRENT) {
@@ -1135,17 +1424,23 @@ export async function runPipeline(projectId: string): Promise<void> {
           await prisma.scene.update({ where: { id: scene.id }, data: { status: "generating" } });
           let clipPath: string;
 
+          const events: TimelineEvent[] = validateTimelineEvents(
+            JSON.parse(scene.timelineJson || "[]")
+          );
+          const cameraEvents = events.filter(e => e.type === "camera_move");
+          const cameraHint = cameraEvents.length > 0
+            ? cameraEvents.map(e => e.content).join(", ")
+            : scene.cameraCue;
+
           if (isVideoProviderConfigured()) {
             const result = await generateVideoClip(
-              scene.description, scene.environment, scene.mood, scene.cameraCue, scene.duration
+              scene.description, scene.environment, scene.mood, cameraHint, scene.duration
             );
             clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
             await downloadFile(result.url, clipPath);
-            await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " clip generated from Replicate");
+            await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " clip generated from Replicate (events: " + events.length + ")");
           } else {
             clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
-            const { execSync } = require("child_process");
-            const label = "Scene " + (scene.index + 1) + ": " + scene.description.slice(0, 60).replace(/'/g, "");
             try {
               execSync(
                 "ffmpeg -y -f lavfi -i color=c=0x1a1a2e:s=1280x720:d=" + scene.duration +
@@ -1154,14 +1449,13 @@ export async function runPipeline(projectId: string): Promise<void> {
                 { encoding: "utf-8", timeout: 60000, stdio: "pipe" }
               );
             } catch (ffErr: any) {
-              console.log("[CLIP] FFmpeg error:", ffErr.stderr?.slice(0, 500) || ffErr.message?.slice(0, 500));
               execSync(
                 "ffmpeg -y -f lavfi -i color=c=0x1a1a2e:s=640x480:d=" + scene.duration +
                 " -pix_fmt yuv420p " + JSON.stringify(clipPath),
                 { encoding: "utf-8", timeout: 60000, stdio: "pipe" }
               );
             }
-            await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " placeholder clip generated (no REPLICATE_API_TOKEN)");
+            await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " placeholder clip (DEV_DEMO mode, events: " + events.length + ")");
           }
 
           await prisma.scene.update({
@@ -1173,7 +1467,7 @@ export async function runPipeline(projectId: string): Promise<void> {
           await prisma.pipelineJob.update({ where: { id: genJob.id }, data: { progress } });
         } catch (err: any) {
           await prisma.scene.update({ where: { id: scene.id }, data: { status: "failed", error: err.message?.slice(0, 500) } });
-          await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " FAILED: " + err.message?.slice(0, 200));
+          await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " FAILED: " + err.message?.slice(0, 200), "ERROR");
         }
       }));
     }
@@ -1199,23 +1493,46 @@ export async function runPipeline(projectId: string): Promise<void> {
       orderBy: { index: "asc" },
     });
     let cumulativeTime = 0;
+    let totalAudioTracks = 0;
+
     for (const scene of updatedScenes) {
-      const sfxTypes = detectSFXTypes(scene.environment, scene.actions);
-      for (const sfxType of sfxTypes) {
-        try {
-          const result = await generateSFX(sfxType, Math.min(scene.duration, 5), audioDir, "sfx_" + scene.index + "_" + sfxType);
+      const events: TimelineEvent[] = validateTimelineEvents(
+        JSON.parse(scene.timelineJson || "[]")
+      );
+
+      if (events.length > 0) {
+        const audioResults = await processTimelineEvents(events, scene.index, audioDir, cumulativeTime);
+        for (const ar of audioResults) {
           await prisma.audioTrack.create({
             data: {
-              sceneId: scene.id, type: "sfx", label: sfxType,
-              url: result.filePath, startTime: cumulativeTime, duration: result.durationSec, status: "complete",
+              sceneId: scene.id, type: ar.eventType, label: ar.eventType + "_" + scene.index,
+              url: ar.filePath, startTime: ar.startTime, duration: ar.durationSec, status: "complete",
             },
           });
-        } catch (err: any) {
-          await pipeLog(projectId, audioJob.id, "audio", "SFX " + sfxType + " for scene " + scene.index + " failed: " + err.message?.slice(0, 100));
+          totalAudioTracks++;
+        }
+        await pipeLog(projectId, audioJob.id, "audio", "Scene " + scene.index + ": " + audioResults.length + " audio tracks from " + events.length + " timeline events");
+      } else {
+        const sfxTypes = detectSFXTypes(scene.environment, scene.actions);
+        for (const sfxType of sfxTypes) {
+          try {
+            const result = await generateSFX(sfxType, Math.min(scene.duration, 5), audioDir, "sfx_" + scene.index + "_" + sfxType);
+            await prisma.audioTrack.create({
+              data: {
+                sceneId: scene.id, type: "sfx", label: sfxType,
+                url: result.filePath, startTime: cumulativeTime, duration: result.durationSec, status: "complete",
+              },
+            });
+            totalAudioTracks++;
+          } catch (err: any) {
+            await pipeLog(projectId, audioJob.id, "audio", "SFX " + sfxType + " for scene " + scene.index + " failed: " + err.message?.slice(0, 100), "WARN");
+          }
         }
       }
       cumulativeTime += scene.duration;
     }
+
+    await pipeLog(projectId, audioJob.id, "audio", "Total audio tracks generated: " + totalAudioTracks);
     await prisma.pipelineJob.update({
       where: { id: audioJob.id },
       data: { status: "complete", progress: 100, completedAt: new Date() },
@@ -1246,14 +1563,18 @@ export async function runPipeline(projectId: string): Promise<void> {
     const stitchInputs: StitchInput[] = completedScenes.map((scene) => {
       const input: StitchInput = {
         clipPath: scene.clipUrl!,
-        audioTracks: scene.audioTracks.map(at => ({ path: at.url!, startTime: cumulativeTime + at.startTime })),
+        audioTracks: scene.audioTracks.map(at => ({
+          path: at.url!,
+          startTime: at.startTime,
+          volume: 0.5,
+        })),
         duration: scene.duration,
       };
       cumulativeTime += scene.duration;
       return input;
     });
 
-    await pipeLog(projectId, stitchJob.id, "stitch", "Stitching " + completedScenes.length + " scenes...");
+    await pipeLog(projectId, stitchJob.id, "stitch", "Stitching " + completedScenes.length + " scenes (" + stitchInputs.reduce((n, s) => n + s.audioTracks.length, 0) + " audio tracks)...");
     const outputPath = await stitchVideo(stitchInputs, workDir, project.title);
 
     await prisma.project.update({ where: { id: projectId }, data: { status: "complete", outputUrl: outputPath } });

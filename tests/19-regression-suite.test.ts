@@ -1833,4 +1833,141 @@ describe("Regression: ai-video-generator-saas template", () => {
     expect(newPage).toContain("input-title");
     expect(newPage).toContain("button-create");
   });
+
+  it("700 template includes scene-contract.ts with TimelineEvent types", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const contract = files.find(f => f.path === "lib/scene-contract.ts");
+    expect(contract).toBeDefined();
+    expect(contract!.content).toContain("TimelineEvent");
+    expect(contract!.content).toContain("SceneSpec");
+    expect(contract!.content).toContain("ProjectSpec");
+    expect(contract!.content).toContain("validateTimelineEvents");
+    expect(contract!.content).toContain("computeSceneDuration");
+    expect(contract!.content).toContain("sceneSpecToLegacy");
+    expect(contract!.content).toContain('"dialogue"');
+    expect(contract!.content).toContain('"narration"');
+    expect(contract!.content).toContain('"sfx"');
+    expect(contract!.content).toContain('"music"');
+    expect(contract!.content).toContain('"camera_move"');
+  });
+
+  it("701 prisma schema includes timelineJson field on Scene model", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const schema = files.find(f => f.path === "prisma/schema.prisma")!.content;
+    expect(schema).toContain("timelineJson");
+    expect(schema).toContain('@default("[]")');
+  });
+
+  it("702 pipeline.ts contains DEV_DEMO production guard", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const pipeline = files.find(f => f.path === "lib/pipeline.ts")!.content;
+    expect(pipeline).toContain("DEV_DEMO");
+    expect(pipeline).toContain("checkProductionRequirements");
+    expect(pipeline).toContain("PRODUCTION SETUP REQUIRED");
+    expect(pipeline).toContain("isDemoMode");
+    expect(pipeline).toContain("REPLICATE_API_TOKEN");
+  });
+
+  it("703 script-parser produces timeline events in structured format", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const parser = files.find(f => f.path === "lib/script-parser.ts")!.content;
+    expect(parser).toContain("TimelineEvent");
+    expect(parser).toContain("validateTimelineEvents");
+    expect(parser).toContain("computeSceneDuration");
+    expect(parser).toContain("events: TimelineEvent[]");
+    expect(parser).toContain("STRUCTURED_SYSTEM_PROMPT");
+    expect(parser).toContain("timeline events");
+  });
+
+  it("704 generate route returns 422 with setup instructions when keys missing and DEV_DEMO not set", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const genRoute = files.find(f => f.path === "app/api/projects/[id]/generate/route.ts")!.content;
+    expect(genRoute).toContain("DEV_DEMO");
+    expect(genRoute).toContain("PRODUCTION SETUP REQUIRED");
+    expect(genRoute).toContain("setupRequired");
+    expect(genRoute).toContain("422");
+    expect(genRoute).toContain("missing");
+  });
+
+  it("705 audio-provider has processTimelineEvents function", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const audio = files.find(f => f.path === "lib/audio-provider.ts")!.content;
+    expect(audio).toContain("processTimelineEvents");
+    expect(audio).toContain("TimelineEvent");
+    expect(audio).toContain("AudioResult");
+    expect(audio).toContain("eventType");
+    expect(audio).toContain("startTime");
+  });
+
+  it("706 parse route stores timelineJson in scene records", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const parseRoute = files.find(f => f.path === "app/api/projects/[id]/parse/route.ts")!.content;
+    expect(parseRoute).toContain("timelineJson");
+    expect(parseRoute).toContain("JSON.stringify(s.events");
+  });
+
+  it("707 project detail page renders timeline events", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const detailPage = files.find(f => f.path === "app/project/[id]/page.tsx")!.content;
+    expect(detailPage).toContain("TimelineEventUI");
+    expect(detailPage).toContain("timelineJson");
+    expect(detailPage).toContain("timeline-scene-");
+    expect(detailPage).toContain("Timeline Events");
+  });
+
+  it("708 .env includes DEV_DEMO variable", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const envFile = files.find(f => f.path === ".env")!.content;
+    expect(envFile).toContain("DEV_DEMO=");
+  });
+
+  it("709 pipeline reads timelineJson from scene and processes events", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const pipeline = files.find(f => f.path === "lib/pipeline.ts")!.content;
+    expect(pipeline).toContain("timelineJson");
+    expect(pipeline).toContain("validateTimelineEvents");
+    expect(pipeline).toContain("processTimelineEvents");
+    expect(pipeline).toContain("camera_move");
+    expect(pipeline).toContain("cameraHint");
+  });
+
+  it("710 stitcher supports volume per audio track", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const stitcher = files.find(f => f.path === "lib/stitcher.ts")!.content;
+    expect(stitcher).toContain("volume");
+    expect(stitcher).toContain("vol.toFixed");
+  });
+
+  it("711 script-parser fallback only runs when DEV_DEMO=true", async () => {
+    const { getTemplate } = await import("../apps/web/lib/templates/index");
+    const tmpl = getTemplate("ai-video-generator-saas")!;
+    const files = tmpl.getFiles();
+    const parser = files.find(f => f.path === "lib/script-parser.ts")!.content;
+    expect(parser).toContain("isDemoMode");
+    expect(parser).toContain("fallbackParse");
+    expect(parser).toContain("SETUP REQUIRED");
+    expect(parser).toContain("DEV_DEMO=true");
+  });
 });
