@@ -159,18 +159,17 @@ VIDEO_STYLE="photorealistic cinematic"
     },
     {
       path: "system-deps.json",
-      content: JSON.stringify({ apk: ["ffmpeg"] }, null, 2) + "\n",
+      content: JSON.stringify({ apk: ["ffmpeg", "x264", "x264-dev", "x264-libs", "lame", "lame-libs", "fontconfig", "ttf-dejavu"] }, null, 2) + "\n",
     },
     {
-      path: "tailwind.config.ts",
-      content: `import type { Config } from "tailwindcss";
-const config: Config = {
+      path: "tailwind.config.js",
+      content: `/** @type {import('tailwindcss').Config} */
+module.exports = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   darkMode: "class",
   theme: { extend: {} },
   plugins: [],
 };
-export default config;
 `,
     },
     {
@@ -734,7 +733,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const stream = fs.createReadStream(filePath);
   const readableStream = new ReadableStream({
     start(controller) {
-      stream.on("data", (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
+      stream.on("data", (chunk: any) => controller.enqueue(new Uint8Array(Buffer.from(chunk))));
       stream.on("end", () => controller.close());
       stream.on("error", (err) => controller.error(err));
     },
@@ -827,9 +826,7 @@ export async function parseScript(script: string): Promise<ParsedScene[]> {
     },
     {
       path: "lib/video-provider.ts",
-      content: `import Replicate from "replicate";
-
-const STYLE = process.env.VIDEO_STYLE || "photorealistic cinematic";
+      content: `const STYLE = process.env.VIDEO_STYLE || "photorealistic cinematic";
 const MODEL = process.env.VIDEO_MODEL || "minimax/video-01-live";
 
 export interface VideoGenResult {
@@ -839,6 +836,34 @@ export interface VideoGenResult {
 
 export function isVideoProviderConfigured(): boolean {
   return !!process.env.REPLICATE_API_TOKEN;
+}
+
+async function replicateRun(model: string, input: Record<string, any>, token: string): Promise<any> {
+  const [owner, name] = model.split("/");
+  const createRes = await fetch("https://api.replicate.com/v1/predictions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+    body: JSON.stringify({ version: model, input }),
+  });
+  if (!createRes.ok) {
+    const body = await createRes.text();
+    throw new Error("Replicate API error " + createRes.status + ": " + body.slice(0, 300));
+  }
+  let prediction = await createRes.json();
+  const maxWait = 300;
+  for (let i = 0; i < maxWait; i++) {
+    if (prediction.status === "succeeded") return prediction.output;
+    if (prediction.status === "failed" || prediction.status === "canceled") {
+      throw new Error("Replicate prediction " + prediction.status + ": " + (prediction.error || "unknown"));
+    }
+    await new Promise(r => setTimeout(r, 2000));
+    const pollRes = await fetch("https://api.replicate.com/v1/predictions/" + prediction.id, {
+      headers: { "Authorization": "Bearer " + token },
+    });
+    if (!pollRes.ok) throw new Error("Replicate poll error " + pollRes.status);
+    prediction = await pollRes.json();
+  }
+  throw new Error("Replicate prediction timed out after " + maxWait + " polls");
 }
 
 export async function generateVideoClip(
@@ -851,8 +876,6 @@ export async function generateVideoClip(
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) throw new Error("REPLICATE_API_TOKEN not configured");
 
-  const replicate = new Replicate({ auth: token });
-
   const prompt = [
     STYLE + " footage.",
     "Scene: " + sceneDescription,
@@ -864,12 +887,10 @@ export async function generateVideoClip(
 
   console.log("[VIDEO] Generating clip with model=" + MODEL + " prompt=" + prompt.slice(0, 120) + "...");
 
-  const output = await replicate.run(MODEL as any, {
-    input: {
-      prompt,
-      num_frames: Math.min(Math.max(Math.round(durationHint * 8), 32), 80),
-    },
-  });
+  const output = await replicateRun(MODEL, {
+    prompt,
+    num_frames: Math.min(Math.max(Math.round(durationHint * 8), 32), 80),
+  }, token);
 
   let url = "";
   if (typeof output === "string") {
@@ -1003,7 +1024,7 @@ export async function stitchVideo(
   const outputPath = path.join(outputDir, "final_output.mp4");
   const concatListPath = path.join(outputDir, "concat_list.txt");
 
-  const entries = scenes.map((s) => "file " + JSON.stringify(s.clipPath)).join("\\n");
+  const entries = scenes.map((s) => "file '" + s.clipPath.replace(/'/g, "'\\\\''") + "'").join("\\n");
   fs.writeFileSync(concatListPath, entries, "utf-8");
 
   console.log("[STITCH] Concatenating " + scenes.length + " clips...");
@@ -1014,8 +1035,9 @@ export async function stitchVideo(
       { encoding: "utf-8", timeout: 300000, stdio: "pipe" }
     );
   } catch (err: any) {
+    console.log("[STITCH] concat copy failed, re-encoding:", err.stderr?.slice(0, 300) || err.message?.slice(0, 300));
     execSync(
-      "ffmpeg -y -f concat -safe 0 -i " + JSON.stringify(concatListPath) + " -c:v libx264 -preset fast -crf 23 " + JSON.stringify(path.join(outputDir, "video_only.mp4")),
+      "ffmpeg -y -f concat -safe 0 -i " + JSON.stringify(concatListPath) + " -pix_fmt yuv420p " + JSON.stringify(path.join(outputDir, "video_only.mp4")),
       { encoding: "utf-8", timeout: 300000, stdio: "pipe" }
     );
   }
@@ -1124,13 +1146,21 @@ export async function runPipeline(projectId: string): Promise<void> {
             clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
             const { execSync } = require("child_process");
             const label = "Scene " + (scene.index + 1) + ": " + scene.description.slice(0, 60).replace(/'/g, "");
-            execSync(
-              "ffmpeg -y -f lavfi -i color=c=0x1a1a2e:s=1280x720:d=" + scene.duration +
-              " -f lavfi -i anullsrc=r=44100:cl=mono -t " + scene.duration +
-              " -vf \\"drawtext=text='" + label + "':fontsize=28:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2\\"" +
-              " -c:v libx264 -preset ultrafast -c:a aac -shortest " + JSON.stringify(clipPath),
-              { encoding: "utf-8", timeout: 60000, stdio: "pipe" }
-            );
+            try {
+              execSync(
+                "ffmpeg -y -f lavfi -i color=c=0x1a1a2e:s=1280x720:d=" + scene.duration +
+                " -f lavfi -i anullsrc=r=44100:cl=mono -t " + scene.duration +
+                " -pix_fmt yuv420p -shortest " + JSON.stringify(clipPath),
+                { encoding: "utf-8", timeout: 60000, stdio: "pipe" }
+              );
+            } catch (ffErr: any) {
+              console.log("[CLIP] FFmpeg error:", ffErr.stderr?.slice(0, 500) || ffErr.message?.slice(0, 500));
+              execSync(
+                "ffmpeg -y -f lavfi -i color=c=0x1a1a2e:s=640x480:d=" + scene.duration +
+                " -pix_fmt yuv420p " + JSON.stringify(clipPath),
+                { encoding: "utf-8", timeout: 60000, stdio: "pipe" }
+              );
+            }
             await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " placeholder clip generated (no REPLICATE_API_TOKEN)");
           }
 
@@ -1261,12 +1291,13 @@ function getPackageJson(): Record<string, unknown> {
       react: "^18.3.0",
       "react-dom": "^18.3.0",
       "@prisma/client": "^5.22.0",
-      replicate: "^1.0.0",
-      openai: "^4.0.0",
     },
     devDependencies: {
       prisma: "^5.22.0",
       typescript: "^5.4.0",
+      tailwindcss: "^3.4.0",
+      postcss: "^8.4.0",
+      autoprefixer: "^10.4.0",
       "@types/node": "^20.0.0",
       "@types/react": "^18.3.0",
       "@types/react-dom": "^18.3.0",
@@ -1303,7 +1334,7 @@ export const aiVideoGeneratorSaasTemplate: TemplateDefinition = {
     "voiceover",
     "tts",
   ],
-  requiredModules: ["next", "react", "@prisma/client", "prisma", "replicate", "openai"],
+  requiredModules: ["next", "react", "@prisma/client", "prisma"],
   requiredRoutes: [
     "/api/health",
     "/api/db-check",

@@ -1704,7 +1704,7 @@ describe("Regression: ai-video-generator-saas template", () => {
     expect(tmpl.description).toBeTruthy();
     expect(tmpl.keywords.length).toBeGreaterThanOrEqual(5);
     expect(tmpl.requiredModules).toContain("next");
-    expect(tmpl.requiredModules).toContain("replicate");
+    expect(tmpl.requiredModules).toContain("@prisma/client");
     expect(tmpl.requiredRoutes).toContain("/api/health");
     expect(tmpl.requiredRoutes).toContain("/api/projects");
     expect(tmpl.requiredEntities).toContain("Project");
@@ -1743,7 +1743,7 @@ describe("Regression: ai-video-generator-saas template", () => {
     const pkg = tmpl.getPackageJson();
     expect(pkg.name).toBe("ai-video-generator-saas");
     expect((pkg.dependencies as any).next).toBeTruthy();
-    expect((pkg.dependencies as any).replicate).toBeTruthy();
+    expect((pkg.dependencies as any).react).toBeTruthy();
     expect((pkg.dependencies as any)["@prisma/client"]).toBeTruthy();
     expect((pkg.scripts as any).build).toContain("prisma");
     expect((pkg.scripts as any).build).toContain("next build");

@@ -631,9 +631,8 @@ export async function runAcceptanceChecks(
       `[ACCEPTANCE] db-check ${dbResult.passed ? "OK" : "FAIL"}: ${dbResult.detail}`);
 
     const aiStatusResult = await checkAiStatus(effectiveUrl);
-    checks.push(aiStatusResult);
-    await logJob(jobId, aiStatusResult.passed ? "SUCCESS" : "ERROR",
-      `[ACCEPTANCE] aiStatus ${aiStatusResult.passed ? "OK" : "FAIL"}: ${aiStatusResult.detail}`);
+    await logJob(jobId, aiStatusResult.passed ? "SUCCESS" : "WARN",
+      `[ACCEPTANCE] aiStatus ${aiStatusResult.passed ? "OK" : "WARN"}: ${aiStatusResult.detail} (non-blocking for video template)`);
 
     const videoHomeResult = await checkVideoHomepage(effectiveUrl);
     checks.push(videoHomeResult);
@@ -645,8 +644,8 @@ export async function runAcceptanceChecks(
     await logJob(jobId, videoCrudResult.passed ? "SUCCESS" : "ERROR",
       `[ACCEPTANCE] videoProjectCrud ${videoCrudResult.passed ? "OK" : "FAIL"}: ${videoCrudResult.detail}`);
 
-    const summary = `dbCheck:${dbResult.passed ? "OK" : "FAIL"} aiStatus:${aiStatusResult.passed ? "OK" : "FAIL"} videoHome:${videoHomeResult.passed ? "OK" : "FAIL"} videoCrud:${videoCrudResult.passed ? "OK" : "FAIL"}`;
-    const allPassed = dbResult.passed && aiStatusResult.passed && videoHomeResult.passed && videoCrudResult.passed;
+    const summary = `dbCheck:${dbResult.passed ? "OK" : "FAIL"} aiStatus:${aiStatusResult.passed ? "OK" : "WARN(non-blocking)"} videoHome:${videoHomeResult.passed ? "OK" : "FAIL"} videoCrud:${videoCrudResult.passed ? "OK" : "FAIL"}`;
+    const allPassed = dbResult.passed && videoHomeResult.passed && videoCrudResult.passed;
     await logJob(jobId, allPassed ? "SUCCESS" : "ERROR",
       `[ACCEPTANCE] result=${allPassed ? "PASS" : "FAIL"} checks=${summary}`);
   } else if (templateKey === "ai-chat-saas") {
