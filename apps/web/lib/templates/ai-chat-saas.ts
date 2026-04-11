@@ -228,16 +228,45 @@ body {
 .image-attachment button {
   background: none; border: none; color: #ef4444; cursor: pointer; font-size: 0.75rem;
 }
-.copy-btn {
-  position: absolute; top: 0.25rem; right: 0.25rem; opacity: 0;
-  background: rgba(30,30,40,0.7); border: 1px solid rgba(255,255,255,0.15);
-  color: #a0a0b0; cursor: pointer; font-size: 0.6875rem;
-  padding: 0.15rem 0.5rem; border-radius: 4px;
-  transition: opacity 0.15s, background 0.15s;
+.copy-msg-btn {
+  opacity: 0; background: rgba(30,30,40,0.85); border: 1px solid rgba(255,255,255,0.12);
+  color: #9090a8; cursor: pointer; font-size: 0.6875rem;
+  padding: 0.2rem 0.55rem; border-radius: 5px;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  white-space: nowrap; margin-left: auto; flex-shrink: 0;
 }
+.message:hover .copy-msg-btn { opacity: 1; }
+.copy-msg-btn:hover { background: rgba(60,60,80,0.95); color: #e0e0f0; }
+.copy-msg-btn.copied { color: #34d399; border-color: rgba(52,211,153,0.3); }
 .message-content { position: relative; }
-.message-content:hover .copy-btn { opacity: 1; }
-.copy-btn:hover { background: rgba(60,60,80,0.9); color: #e0e0f0; }
+.text-panel {
+  position: relative; background: #0f0f1a; border: 1px solid #2a2a3e;
+  border-radius: 10px; margin: 0.625rem 0 0.25rem; overflow: hidden;
+}
+.text-panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.35rem 0.75rem; border-bottom: 1px solid #2a2a3e;
+  background: rgba(20,20,35,0.6);
+}
+.text-panel-label {
+  font-size: 0.625rem; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: #6b7280;
+}
+.text-panel-copy {
+  background: transparent; border: 1px solid rgba(255,255,255,0.1);
+  color: #9090a8; cursor: pointer; font-size: 0.6875rem;
+  padding: 0.15rem 0.5rem; border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+.text-panel-copy:hover { background: rgba(60,60,80,0.8); color: #e0e0f0; }
+.text-panel-copy.copied { color: #34d399; border-color: rgba(52,211,153,0.3); }
+.text-panel-body {
+  padding: 0.75rem; font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.8125rem; line-height: 1.65; color: #d4d4e8;
+  white-space: pre-wrap; word-break: break-word; overflow-x: auto;
+  max-height: 400px; overflow-y: auto;
+}
+.prose-text { white-space: pre-wrap; word-break: break-word; }
 .input-hint {
   font-size: 0.6875rem; color: #6b7280; text-align: center;
   padding: 0.25rem 0 0; user-select: none;
@@ -501,6 +530,43 @@ export default function ChatApp() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
+  function extractFencedBlocks(content: string): string[] {
+    const regex = /\`\`\`[a-zA-Z0-9_-]*\\n([\\s\\S]*?)\\n\`\`\`/gm;
+    const blocks: string[] = [];
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+      const block = match[1].replace(/^\\n+|\\n+$/g, '');
+      if (block) blocks.push(block);
+    }
+    return blocks;
+  }
+
+  function extractCopyText(content: string): string {
+    const blocks = extractFencedBlocks(content);
+    return blocks.length > 0 ? blocks[0] : content;
+  }
+
+  function renderMessageContent(content: string): { parts: { type: 'text' | 'code'; lang: string; value: string }[] } {
+    const parts: { type: 'text' | 'code'; lang: string; value: string }[] = [];
+    const regex = /\`\`\`([a-zA-Z0-9_-]*)\\n([\\s\\S]*?)\\n\`\`\`/gm;
+    let lastIndex = 0;
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+      if (match.index > lastIndex) {
+        const text = content.slice(lastIndex, match.index).trim();
+        if (text) parts.push({ type: 'text', lang: '', value: text });
+      }
+      parts.push({ type: 'code', lang: match[1] || 'text', value: match[2].replace(/^\\n+|\\n+$/g, '') });
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < content.length) {
+      const text = content.slice(lastIndex).trim();
+      if (text) parts.push({ type: 'text', lang: '', value: text });
+    }
+    if (parts.length === 0) parts.push({ type: 'text', lang: '', value: content });
+    return { parts };
+  }
+
   async function copyToClipboard(text: string, messageId: string) {
     const isBrowser = typeof window !== 'undefined';
     let ok = false;
@@ -670,32 +736,55 @@ export default function ChatApp() {
             </div>
           ) : (
             <div className="messages-container">
-              {messages.map(m => (
-                <div key={m.id} className="message">
+              {messages.map(m => {
+                const parsed = renderMessageContent(m.content);
+                const hasCode = parsed.parts.some(p => p.type === 'code');
+                const copyText = extractCopyText(m.content);
+                return (
+                <div key={m.id} className="message" data-testid={\`message-\${m.id}\`}>
                   <div className={\`message-avatar \${m.role}\`}>
                     {m.role === 'user' ? 'U' : 'AI'}
                   </div>
-                  <div className="message-content" data-copy-text={m.content}>
+                  <div className="message-content">
                     {m.imageUrl && (
                       <img src={m.imageUrl} alt="attachment" className="image-preview" />
                     )}
-                    <p style={{ whiteSpace: 'pre-wrap' }}>{m.content}</p>
-                    <button
-                      className="copy-btn"
-                      onClick={() => copyToClipboard(m.content, m.id)}
-                      title={copiedId === m.id ? 'Copied' : 'Copy'}
-                      data-testid={\`btn-copy-message-\${m.id}\`}
-                    >
-                      {copiedId === m.id ? '\\u2713 Copied' : '\\u2398 Copy'}
-                    </button>
+                    {parsed.parts.map((part, idx) => part.type === 'text' ? (
+                      <p key={idx} className="prose-text">{part.value}</p>
+                    ) : (
+                      <div key={idx} className="text-panel" data-testid={\`text-panel-\${m.id}-\${idx}\`}>
+                        <div className="text-panel-header">
+                          <span className="text-panel-label">{part.lang.toUpperCase() || 'TEXT'}</span>
+                          <button
+                            className={\`text-panel-copy \${copiedId === m.id + '-' + idx ? 'copied' : ''}\`}
+                            onClick={() => copyToClipboard(part.value, m.id + '-' + idx)}
+                            data-testid={\`btn-copy-block-\${m.id}-\${idx}\`}
+                          >
+                            {copiedId === m.id + '-' + idx ? '\\u2713 Copied' : '\\u2398 Copy'}
+                          </button>
+                        </div>
+                        <div className="text-panel-body">{part.value}</div>
+                      </div>
+                    ))}
+                    {!hasCode && (
+                      <button
+                        className={\`copy-msg-btn \${copiedId === m.id ? 'copied' : ''}\`}
+                        onClick={() => copyToClipboard(copyText, m.id)}
+                        title={copiedId === m.id ? 'Copied' : 'Copy message'}
+                        data-testid={\`btn-copy-message-\${m.id}\`}
+                      >
+                        {copiedId === m.id ? '\\u2713 Copied' : '\\u2398 Copy'}
+                      </button>
+                    )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
               {(loading || streamingText) && (
                 <div className="message">
                   <div className="message-avatar assistant">AI</div>
                   <div className="message-content">
-                    <p style={{ whiteSpace: 'pre-wrap' }}>
+                    <p className="prose-text">
                       {streamingText || 'Thinking...'}
                     </p>
                   </div>

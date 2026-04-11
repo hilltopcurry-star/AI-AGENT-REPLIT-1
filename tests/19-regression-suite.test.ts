@@ -1337,20 +1337,21 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(template).toContain("!STOP_RAG.has(w)");
   });
 
-  it("648 ai-chat-saas every message has a Copy button with data-testid", async () => {
+  it("648 ai-chat-saas every message has Copy buttons with data-testid", async () => {
     const fs = await import("fs");
     const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
     expect(template).toContain("btn-copy-message-");
-    expect(template).toContain("copy-btn");
+    expect(template).toContain("btn-copy-block-");
     expect(template).toContain("copyToClipboard");
     expect(template).toContain("navigator.clipboard.writeText");
   });
 
-  it("649 ai-chat-saas Copy button copies exact raw content via data-copy-text", async () => {
+  it("649 ai-chat-saas Copy extracts code block content, not full message", async () => {
     const fs = await import("fs");
     const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
-    expect(template).toContain("data-copy-text={m.content}");
-    expect(template).toContain("copyToClipboard(m.content, m.id)");
+    expect(template).toContain("extractCopyText");
+    expect(template).toContain("copyToClipboard(part.value,");
+    expect(template).toContain("copyToClipboard(copyText, m.id)");
     expect(template).not.toContain("copyToClipboard(m.content + ");
   });
 
@@ -1363,12 +1364,12 @@ describe("AI Chat template (feature-flagged)", () => {
     expect(template).toContain("Copied");
   });
 
-  it("651 ai-chat-saas Copy button has CSS with hover reveal", async () => {
+  it("651 ai-chat-saas Copy buttons have CSS with hover reveal", async () => {
     const fs = await import("fs");
     const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
-    expect(template).toContain(".copy-btn");
+    expect(template).toContain("copy-msg-btn");
     expect(template).toContain("opacity: 0");
-    expect(template).toContain(".message-content:hover .copy-btn");
+    expect(template).toContain(".message:hover .copy-msg-btn");
     expect(template).toContain("opacity: 1");
   });
 
@@ -1472,5 +1473,72 @@ describe("AI Chat template (feature-flagged)", () => {
     const deployer = fs.readFileSync("apps/web/lib/fly-deployer.ts", "utf-8");
     expect(deployer).toContain("Force new app requested");
     expect(deployer).toContain("!forceNewApp");
+  });
+
+  it("665 extractCopyText returns only code block content when fenced block present", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("extractCopyText");
+    expect(template).toContain("extractFencedBlocks");
+    expect(template).toContain("blocks.length > 0 ? blocks[0] : content");
+  });
+
+  it("666 extractFencedBlocks uses correct regex for fenced code blocks", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("[a-zA-Z0-9_-]*");
+    expect(template).toContain("gm");
+    expect(template).toContain("regex.exec(content)");
+  });
+
+  it("667 code blocks render in TEXT panel with own Copy button", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("text-panel");
+    expect(template).toContain("text-panel-header");
+    expect(template).toContain("text-panel-label");
+    expect(template).toContain("text-panel-body");
+    expect(template).toContain("text-panel-copy");
+    expect(template).toContain("btn-copy-block-");
+  });
+
+  it("668 TEXT panel Copy copies ONLY the code block value, not surrounding text", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("copyToClipboard(part.value,");
+    expect(template).not.toContain("copyToClipboard(m.content,");
+  });
+
+  it("669 plain messages without code blocks still have a copy button", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("!hasCode");
+    expect(template).toContain("copy-msg-btn");
+    expect(template).toContain("btn-copy-message-");
+  });
+
+  it("670 renderMessageContent splits content into text and code parts", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("renderMessageContent");
+    expect(template).toContain("type: 'text'");
+    expect(template).toContain("type: 'code'");
+    expect(template).toContain("part.lang");
+  });
+
+  it("671 TEXT panel has monospace font and styling for code display", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("SF Mono");
+    expect(template).toContain("Consolas");
+    expect(template).toContain("text-panel-body");
+    expect(template).toContain("max-height: 400px");
+  });
+
+  it("672 TEXT panel label shows language from code fence", async () => {
+    const fs = await import("fs");
+    const template = fs.readFileSync("apps/web/lib/templates/ai-chat-saas.ts", "utf-8");
+    expect(template).toContain("part.lang.toUpperCase()");
+    expect(template).toContain("|| 'TEXT'");
   });
 });
