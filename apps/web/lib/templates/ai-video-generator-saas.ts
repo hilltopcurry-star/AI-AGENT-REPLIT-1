@@ -1285,7 +1285,7 @@ export async function GET() {
   const videoStyle = process.env.VIDEO_STYLE || "photorealistic cinematic";
   const isDemoMode = process.env.DEMO_MODE === "true";
 
-  let replicateCheck: { valid: boolean; error?: string; username?: string } | null = null;
+  let replicateCheck: { valid: boolean; error?: string; username?: string; billingStatus?: string } | null = null;
   let openaiCheck: { valid: boolean; error?: string } | null = null;
 
   if (replicateToken) {
