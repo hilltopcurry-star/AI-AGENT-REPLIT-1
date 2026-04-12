@@ -541,11 +541,13 @@ interface ServiceInfo {
   error?: string;
   username?: string;
   baseUrl?: string;
+  billingUrl?: string;
 }
 interface AIStatus {
   ready: boolean;
   demoMode: boolean;
   hasInvalidTokens: boolean;
+  hasBillingIssues: boolean;
   videoModel: string;
   videoStyle: string;
   services: ServiceInfo[];
@@ -626,11 +628,14 @@ export default function SetupPage() {
             {status.services.map((svc: any) => {
               const isGood = svc.status === "valid" || svc.status === "configured";
               const isInvalid = svc.status === "invalid";
-              const borderColor = isGood ? "rgba(34,197,94,0.2)" : isInvalid ? "rgba(245,158,11,0.4)" : "rgba(239,68,68,0.3)";
-              const badgeBg = isGood ? "rgba(34,197,94,0.12)" : isInvalid ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.12)";
-              const badgeColor = isGood ? "#4ade80" : isInvalid ? "#fbbf24" : "#f87171";
-              const dotColor = isGood ? "#22c55e" : isInvalid ? "#f59e0b" : "#ef4444";
-              const statusLabel = isGood ? (svc.status === "valid" ? "valid" : "configured") : isInvalid ? "invalid" : "missing";
+              const isBilling = svc.status === "billing_required";
+              const isRateLimited = svc.status === "rate_limited";
+              const isWarn = isInvalid || isBilling || isRateLimited;
+              const borderColor = isGood ? "rgba(34,197,94,0.2)" : isBilling ? "rgba(239,68,68,0.4)" : isWarn ? "rgba(245,158,11,0.4)" : "rgba(239,68,68,0.3)";
+              const badgeBg = isGood ? "rgba(34,197,94,0.12)" : isBilling ? "rgba(239,68,68,0.12)" : isWarn ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.12)";
+              const badgeColor = isGood ? "#4ade80" : isBilling ? "#f87171" : isWarn ? "#fbbf24" : "#f87171";
+              const dotColor = isGood ? "#22c55e" : isBilling ? "#ef4444" : isWarn ? "#f59e0b" : "#ef4444";
+              const statusLabel = isGood ? (svc.status === "valid" ? "valid" : "configured") : isBilling ? "billing required" : isRateLimited ? "rate limited" : isInvalid ? "invalid" : "missing";
 
               return (
                 <div key={svc.key} className="glass-card" style={{ padding: 20, borderColor }}>
@@ -651,6 +656,26 @@ export default function SetupPage() {
                     <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 6 }}>
                       API: <code style={{ padding: "1px 6px", background: "var(--surface)", borderRadius: 4, fontFamily: "monospace", fontSize: 11 }}>{svc.baseUrl}</code>
                       {svc.username && <span style={{ marginLeft: 8, color: "#4ade80" }}>&#10003; {svc.username}</span>}
+                    </div>
+                  )}
+                  {isBilling && (
+                    <div style={{ padding: "12px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, fontSize: 13, marginBottom: 8 }}>
+                      <div style={{ fontWeight: 600, color: "#f87171", marginBottom: 4 }}>&#128179; Billing Required</div>
+                      <div style={{ color: "var(--text2)", marginBottom: 8 }}>{svc.error || "Insufficient credits to run predictions"}</div>
+                      <a href={svc.billingUrl || "https://replicate.com/account/billing"} target="_blank" rel="noopener"
+                        style={{ display: "inline-block", padding: "8px 16px", background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, color: "#f87171", fontWeight: 600, textDecoration: "none", fontSize: 13 }}>
+                        &#8594; Add Credits on Replicate
+                      </a>
+                    </div>
+                  )}
+                  {isRateLimited && (
+                    <div style={{ padding: "12px 14px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 8, fontSize: 13, marginBottom: 8 }}>
+                      <div style={{ fontWeight: 600, color: "#fbbf24", marginBottom: 4 }}>&#9201; Rate Limited</div>
+                      <div style={{ color: "var(--text2)", marginBottom: 8 }}>{svc.error || "Rate limit reduced until payment method is added"}</div>
+                      <a href={svc.billingUrl || "https://replicate.com/account/billing"} target="_blank" rel="noopener"
+                        style={{ display: "inline-block", padding: "8px 16px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 8, color: "#fbbf24", fontWeight: 600, textDecoration: "none", fontSize: 13 }}>
+                        &#8594; Upgrade Rate Limits
+                      </a>
                     </div>
                   )}
                   {isInvalid && (
@@ -815,10 +840,14 @@ export default function ProjectPage() {
   );
 
   const done = project.scenes.filter(s => s.status === "complete").length;
+  const failed = project.scenes.filter(s => s.status === "failed").length;
   const total = project.scenes.length;
   const progress = total > 0 ? Math.round((done / total) * 100) : 0;
   const isActive = project.status === "generating" || project.status === "stitching";
   const totalDuration = project.scenes.reduce((sum, s) => sum + s.duration, 0);
+  const hasBillingError = project.scenes.some(s => s.error?.startsWith("[BILLING]"));
+  const hasRateLimitError = project.scenes.some(s => s.error?.startsWith("[RATE_LIMIT]"));
+  const hasRetryableFailures = failed > 0 && !isActive;
 
   return (
     <div style={{ maxWidth: 1000, margin: "0 auto", padding: "32px 24px" }} className="fade-in">
@@ -833,6 +862,7 @@ export default function ProjectPage() {
             <Badge status={project.status} />
             <span data-testid="text-project-status" style={{ display: "none" }}>{project.status}</span>
             {total > 0 && <span style={{ color: "var(--text2)", fontSize: 13 }}>&#127916; {total} scenes &middot; {totalDuration.toFixed(1)}s total</span>}
+            {failed > 0 && <span style={{ color: "#f87171", fontSize: 13, fontWeight: 600 }}>&#9888; {failed} failed</span>}
           </div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
@@ -846,6 +876,12 @@ export default function ProjectPage() {
               {actionLoading === "generate" ? "Starting..." : "&#9654; Generate Video"}
             </button>
           )}
+          {hasRetryableFailures && (
+            <button data-testid="button-retry-failed" onClick={() => doAction("retry-failed")} disabled={!!actionLoading}
+              className="btn-primary" style={{ background: "rgba(245,158,11,0.15)", color: "#fbbf24", border: "1px solid rgba(245,158,11,0.4)" }}>
+              {actionLoading === "retry-failed" ? "Retrying..." : "\\u21BB Retry " + failed + " Failed Scene" + (failed > 1 ? "s" : "")}
+            </button>
+          )}
           {project.status === "complete" && project.outputUrl && (
             <a data-testid="link-download" href={"/api/projects/" + id + "/download"} className="btn-primary">
               &#11015; Download MP4
@@ -853,6 +889,54 @@ export default function ProjectPage() {
           )}
         </div>
       </div>
+
+      {hasBillingError && (
+        <div className="glass-card" data-testid="banner-billing-error" style={{ padding: 20, marginBottom: 24, borderColor: "rgba(239,68,68,0.5)", background: "rgba(239,68,68,0.06)" }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+            <span style={{ fontSize: 24 }}>&#128176;</span>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ fontWeight: 700, color: "#f87171", marginBottom: 6, fontSize: 15 }}>Billing Required</h3>
+              <p style={{ fontSize: 13, color: "var(--text2)", marginBottom: 12, lineHeight: 1.5 }}>
+                Replicate returned a 402 error — your account has insufficient credits. Add a payment method or purchase credits to continue generating videos.
+              </p>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <a href="https://replicate.com/account/billing" target="_blank" rel="noopener"
+                  className="btn-primary" style={{ fontSize: 13, padding: "8px 16px", textDecoration: "none" }}>
+                  &#8594; Add Credits on Replicate
+                </a>
+                <button data-testid="button-retry-billing" onClick={() => doAction("retry-failed")} disabled={!!actionLoading}
+                  className="btn-secondary" style={{ fontSize: 13, padding: "8px 16px" }}>
+                  {actionLoading === "retry-failed" ? "Retrying..." : "\\u21BB Retry After Adding Credits"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {hasRateLimitError && !hasBillingError && (
+        <div className="glass-card" data-testid="banner-ratelimit-error" style={{ padding: 20, marginBottom: 24, borderColor: "rgba(245,158,11,0.5)", background: "rgba(245,158,11,0.06)" }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+            <span style={{ fontSize: 24 }}>&#9201;</span>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ fontWeight: 700, color: "#fbbf24", marginBottom: 6, fontSize: 15 }}>Rate Limited</h3>
+              <p style={{ fontSize: 13, color: "var(--text2)", marginBottom: 12, lineHeight: 1.5 }}>
+                Replicate rate-limited video generation after multiple retries. Adding a payment method removes rate limits for faster generation.
+              </p>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <a href="https://replicate.com/account/billing" target="_blank" rel="noopener"
+                  className="btn-secondary" style={{ fontSize: 13, padding: "8px 16px", textDecoration: "none" }}>
+                  &#8594; Upgrade Rate Limits
+                </a>
+                <button data-testid="button-retry-ratelimit" onClick={() => doAction("retry-failed")} disabled={!!actionLoading}
+                  className="btn-primary" style={{ fontSize: 13, padding: "8px 16px" }}>
+                  {actionLoading === "retry-failed" ? "Retrying..." : "\\u21BB Retry Failed Scenes"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {setupError && (
         <div className="glass-card" style={{ padding: 20, marginBottom: 24, borderColor: "var(--error)", background: "rgba(239,68,68,0.06)" }}>
@@ -988,7 +1072,21 @@ export default function ProjectPage() {
                     </div>
                   )}
                   {scene.error && (
-                    <div style={{ color: "var(--error)", fontSize: 13, marginTop: 8, padding: "8px 12px", background: "rgba(239,68,68,0.06)", borderRadius: 8 }}>&#9888; {scene.error}</div>
+                    <div style={{ fontSize: 13, marginTop: 8, padding: "10px 14px", borderRadius: 8,
+                      background: scene.error.startsWith("[BILLING]") ? "rgba(239,68,68,0.08)" : scene.error.startsWith("[RATE_LIMIT]") ? "rgba(245,158,11,0.08)" : "rgba(239,68,68,0.06)",
+                      border: "1px solid " + (scene.error.startsWith("[BILLING]") ? "rgba(239,68,68,0.3)" : scene.error.startsWith("[RATE_LIMIT]") ? "rgba(245,158,11,0.3)" : "transparent"),
+                      color: scene.error.startsWith("[BILLING]") ? "#f87171" : scene.error.startsWith("[RATE_LIMIT]") ? "#fbbf24" : "var(--error)" }}>
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                        {scene.error.startsWith("[BILLING]") ? "\\u{1F4B3} Billing Required" : scene.error.startsWith("[RATE_LIMIT]") ? "\\u23F1 Rate Limited" : "\\u26A0 Error"}
+                      </div>
+                      <div style={{ color: "var(--text2)" }}>{scene.error.replace(/^\\[(BILLING|RATE_LIMIT)\\] /, "")}</div>
+                      {scene.error.startsWith("[BILLING]") && (
+                        <a href="https://replicate.com/account/billing" target="_blank" rel="noopener"
+                          style={{ color: "var(--accent2)", fontSize: 12, textDecoration: "none", marginTop: 6, display: "inline-block" }}>
+                          \\u2192 Add credits on Replicate
+                        </a>
+                      )}
+                    </div>
                   )}
                 </div>
               );
@@ -1135,14 +1233,27 @@ export async function GET() {
       content: `import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
-async function checkReplicateToken(token: string): Promise<{ valid: boolean; error?: string; username?: string }> {
+async function checkReplicateToken(token: string): Promise<{ valid: boolean; error?: string; username?: string; billingStatus?: string }> {
   try {
     const res = await fetch("https://api.replicate.com/v1/account", {
       headers: { "Authorization": "Bearer " + token },
     });
     if (res.ok) {
       const data = await res.json();
-      return { valid: true, username: data.username || data.github_url || "authenticated" };
+      let billingStatus = "active";
+      try {
+        const testRes = await fetch("https://api.replicate.com/v1/predictions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+          body: JSON.stringify({ version: "test/probe", input: {} }),
+        });
+        if (testRes.status === 402) {
+          billingStatus = "billing_required";
+        } else if (testRes.status === 429) {
+          billingStatus = "rate_limited";
+        }
+      } catch {}
+      return { valid: true, username: data.username || data.github_url || "authenticated", billingStatus };
     }
     if (res.status === 401) {
       return { valid: false, error: "Token is invalid or expired (401 Unauthenticated)" };
@@ -1220,14 +1331,22 @@ export async function GET() {
     {
       name: "Video Generator",
       key: "videoProvider",
-      status: replicateStatus,
+      status: replicateCheck?.billingStatus === "billing_required" ? "billing_required"
+        : replicateCheck?.billingStatus === "rate_limited" ? "rate_limited"
+        : replicateStatus,
       provider: replicateToken ? "replicate" : "none",
       envVar: "REPLICATE_API_TOKEN",
       helpUrl: "https://replicate.com/account/api-tokens",
       description: "Generates video clips from scene descriptions using " + videoModel,
-      error: replicateCheck?.error,
+      error: replicateCheck?.billingStatus === "billing_required"
+        ? "Insufficient credits. Add a payment method at https://replicate.com/account/billing"
+        : replicateCheck?.billingStatus === "rate_limited"
+        ? "Rate limited. Add a payment method to increase limits: https://replicate.com/account/billing"
+        : replicateCheck?.error,
       username: replicateCheck?.username,
       baseUrl: replicateToken ? "https://api.replicate.com/v1" : undefined,
+      billingUrl: (replicateCheck?.billingStatus === "billing_required" || replicateCheck?.billingStatus === "rate_limited")
+        ? "https://replicate.com/account/billing" : undefined,
     },
     {
       name: "Text-to-Speech",
@@ -1244,7 +1363,8 @@ export async function GET() {
 
   const allWorking = services.every(s => s.status === "valid" || s.status === "configured");
   const hasInvalid = services.some(s => s.status === "invalid");
-  const missingServices = services.filter(s => s.status === "missing" || s.status === "invalid");
+  const hasBillingIssues = services.some(s => s.status === "billing_required" || s.status === "rate_limited");
+  const missingServices = services.filter(s => s.status === "missing" || s.status === "invalid" || s.status === "billing_required" || s.status === "rate_limited");
 
   return NextResponse.json({
     scriptParser: services[0].status,
@@ -1256,8 +1376,9 @@ export async function GET() {
     tts: services[2].status,
     realisticMode: true,
     demoMode: isDemoMode,
-    ready: allWorking && !hasInvalid,
+    ready: allWorking && !hasInvalid && !hasBillingIssues,
     hasInvalidTokens: hasInvalid,
+    hasBillingIssues,
     services,
     missing: missingServices.map(s => ({
       name: s.name,
@@ -1483,6 +1604,50 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 `,
     },
     {
+      path: "app/api/projects/[id]/retry-failed/route.ts",
+      content: `import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { runPipelineRetry } from "@/lib/pipeline";
+export const dynamic = "force-dynamic";
+
+export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const project = await prisma.project.findUnique({ where: { id }, include: { scenes: true } });
+  if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const failedScenes = project.scenes.filter(s => s.status === "failed");
+  if (failedScenes.length === 0) {
+    return NextResponse.json({ error: "No failed scenes to retry" }, { status: 400 });
+  }
+
+  const hasVideoKey = !!process.env.REPLICATE_API_TOKEN;
+  const isDemoMode = process.env.DEMO_MODE === "true";
+  if (!hasVideoKey && !isDemoMode) {
+    return NextResponse.json({
+      error: "REPLICATE_API_TOKEN is not configured.",
+      setupRequired: true,
+    }, { status: 422 });
+  }
+
+  for (const scene of failedScenes) {
+    await prisma.scene.update({ where: { id: scene.id }, data: { status: "pending", error: null } });
+  }
+  await prisma.project.update({ where: { id }, data: { status: "generating" } });
+
+  runPipelineRetry(id, failedScenes.map(s => s.id)).catch(async (err) => {
+    console.error("[PIPELINE-RETRY] Fatal error:", err);
+    await prisma.project.update({ where: { id }, data: { status: "failed" } }).catch(() => {});
+  });
+
+  return NextResponse.json({
+    ok: true,
+    message: "Retrying " + failedScenes.length + " failed scene(s)",
+    retrying: failedScenes.map(s => s.index),
+  });
+}
+`,
+    },
+    {
       path: "lib/script-parser.ts",
       content: `import type { SceneSpec, TimelineEvent } from "./scene-contract";
 import { validateTimelineEvents, computeSceneDuration } from "./scene-contract";
@@ -1633,17 +1798,85 @@ export function isVideoProviderConfigured(): boolean {
   return !!process.env.REPLICATE_API_TOKEN;
 }
 
+class ReplicateBillingError extends Error {
+  constructor(message: string, public model: string, public billingUrl: string) {
+    super(message);
+    this.name = "ReplicateBillingError";
+  }
+}
+
+class ReplicateRateLimitError extends Error {
+  public retryAfter: number;
+  constructor(message: string, retryAfter: number) {
+    super(message);
+    this.name = "ReplicateRateLimitError";
+    this.retryAfter = retryAfter;
+  }
+}
+
+const replicateQueue: (() => Promise<void>)[] = [];
+let replicateQueueRunning = false;
+
+async function drainReplicateQueue() {
+  if (replicateQueueRunning) return;
+  replicateQueueRunning = true;
+  while (replicateQueue.length > 0) {
+    const task = replicateQueue.shift()!;
+    await task();
+  }
+  replicateQueueRunning = false;
+}
+
+function enqueueReplicateCall<T>(fn: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    replicateQueue.push(async () => {
+      try { resolve(await fn()); } catch (e) { reject(e); }
+    });
+    drainReplicateQueue();
+  });
+}
+
 async function replicateRun(model: string, input: Record<string, any>, token: string): Promise<any> {
-  const [owner, name] = model.split("/");
+  return enqueueReplicateCall(() => replicateRunInner(model, input, token));
+}
+
+async function replicateRunInner(model: string, input: Record<string, any>, token: string, attempt = 0): Promise<any> {
+  const MAX_RETRIES = 5;
   const createRes = await fetch("https://api.replicate.com/v1/predictions", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
     body: JSON.stringify({ version: model, input }),
   });
+
+  if (createRes.status === 402) {
+    const body = await createRes.text();
+    throw new ReplicateBillingError(
+      "Insufficient Replicate credits. Add a payment method or purchase credits at https://replicate.com/account/billing to continue. Model: " + model,
+      model,
+      "https://replicate.com/account/billing"
+    );
+  }
+
+  if (createRes.status === 429) {
+    if (attempt >= MAX_RETRIES) {
+      throw new ReplicateRateLimitError(
+        "Rate limit exceeded after " + MAX_RETRIES + " retries. Add a payment method to increase your rate limit: https://replicate.com/account/billing",
+        0
+      );
+    }
+    const retryAfterHeader = createRes.headers.get("retry-after");
+    const retryAfter = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 0;
+    const backoff = Math.max(retryAfter, Math.pow(2, attempt + 1)) * 1000;
+    console.log("[VIDEO] Rate limited (429). retry_after=" + retryAfter + "s, backing off " + (backoff / 1000) + "s (attempt " + (attempt + 1) + "/" + MAX_RETRIES + ")");
+    await new Promise(r => setTimeout(r, backoff));
+    return replicateRunInner(model, input, token, attempt + 1);
+  }
+
   if (!createRes.ok) {
     const body = await createRes.text();
     throw new Error("Replicate API error " + createRes.status + ": " + body.slice(0, 300));
   }
+
   let prediction = await createRes.json();
   const maxWait = 300;
   for (let i = 0; i < maxWait; i++) {
@@ -1655,6 +1888,13 @@ async function replicateRun(model: string, input: Record<string, any>, token: st
     const pollRes = await fetch("https://api.replicate.com/v1/predictions/" + prediction.id, {
       headers: { "Authorization": "Bearer " + token },
     });
+    if (pollRes.status === 429) {
+      const retryAfterHeader = pollRes.headers.get("retry-after");
+      const pollBackoff = Math.max(retryAfterHeader ? parseInt(retryAfterHeader, 10) : 5, 5) * 1000;
+      console.log("[VIDEO] Poll rate limited, waiting " + (pollBackoff / 1000) + "s");
+      await new Promise(r => setTimeout(r, pollBackoff));
+      continue;
+    }
     if (!pollRes.ok) throw new Error("Replicate poll error " + pollRes.status);
     prediction = await pollRes.json();
   }
@@ -1999,7 +2239,7 @@ import * as path from "path";
 import { execSync } from "child_process";
 
 const OUTPUT_ROOT = process.env.OUTPUT_DIR || "/tmp/videogen";
-const MAX_CONCURRENT = 2;
+const MAX_CONCURRENT = 1;
 
 function isDemoMode(): boolean {
   return process.env.DEMO_MODE === "true";
@@ -2132,8 +2372,16 @@ export async function runPipeline(projectId: string): Promise<void> {
           const progress = Math.round(((i + batch.indexOf(scene) + 1) / scenes.length) * 100);
           await prisma.pipelineJob.update({ where: { id: genJob.id }, data: { progress } });
         } catch (err: any) {
-          await prisma.scene.update({ where: { id: scene.id }, data: { status: "failed", error: err.message?.slice(0, 500) } });
-          await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " FAILED: " + err.message?.slice(0, 200), "ERROR");
+          const isBilling = err.name === "ReplicateBillingError";
+          const isRateLimit = err.name === "ReplicateRateLimitError";
+          const errorPrefix = isBilling ? "[BILLING] " : isRateLimit ? "[RATE_LIMIT] " : "";
+          const sceneError = errorPrefix + (err.message?.slice(0, 500) || "Unknown error");
+          await prisma.scene.update({ where: { id: scene.id }, data: { status: "failed", error: sceneError } });
+          await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " FAILED: " + sceneError.slice(0, 200), "ERROR");
+          if (isBilling) {
+            await pipeLog(projectId, genJob.id, "generate_clips", "BILLING ERROR: Stopping pipeline. Add credits at https://replicate.com/account/billing then retry failed scenes.", "ERROR");
+            throw err;
+          }
         }
       }));
     }
@@ -2253,6 +2501,110 @@ export async function runPipeline(projectId: string): Promise<void> {
     await prisma.project.update({ where: { id: projectId }, data: { status: "failed" } });
     await prisma.pipelineJob.update({
       where: { id: stitchJob.id },
+      data: { status: "failed", error: err.message?.slice(0, 500), completedAt: new Date() },
+    });
+    throw err;
+  }
+}
+
+export async function runPipelineRetry(projectId: string, failedSceneIds: string[]): Promise<void> {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    include: { scenes: { orderBy: { index: "asc" } } },
+  });
+  if (!project) throw new Error("Project not found: " + projectId);
+
+  const workDir = path.join(OUTPUT_ROOT, projectId);
+  const clipsDir = path.join(workDir, "clips");
+  const audioDir = path.join(workDir, "audio");
+  fs.mkdirSync(clipsDir, { recursive: true });
+  fs.mkdirSync(audioDir, { recursive: true });
+
+  const retryJob = await prisma.pipelineJob.create({
+    data: { projectId, stage: "retry_failed", status: "running", startedAt: new Date() },
+  });
+
+  const scenesToRetry = project.scenes.filter(s => failedSceneIds.includes(s.id));
+  await pipeLog(projectId, retryJob.id, "retry_failed", "Retrying " + scenesToRetry.length + " failed scenes");
+
+  try {
+    for (let i = 0; i < scenesToRetry.length; i++) {
+      const scene = scenesToRetry[i];
+      try {
+        await prisma.scene.update({ where: { id: scene.id }, data: { status: "generating" } });
+        let clipPath: string;
+
+        const events: TimelineEvent[] = validateTimelineEvents(JSON.parse(scene.timelineJson || "[]"));
+        const cameraEvents = events.filter(e => e.type === "camera_move");
+        const cameraHint = cameraEvents.length > 0 ? cameraEvents.map(e => e.content).join(", ") : scene.cameraCue;
+
+        if (isVideoProviderConfigured()) {
+          const result = await generateVideoClip(scene.description, scene.environment, scene.mood, cameraHint, scene.duration);
+          clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
+          await downloadFile(result.url, clipPath);
+          await pipeLog(projectId, retryJob.id, "retry_failed", "Scene " + scene.index + " retried successfully from Replicate");
+        } else {
+          clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
+          const bgColor = "0x1e40af";
+          execSync(
+            "ffmpeg -y -f lavfi -i color=c=" + bgColor + ":s=1280x720:d=" + scene.duration +
+            " -c:v libx264 -pix_fmt yuv420p -t " + scene.duration + " " + JSON.stringify(clipPath),
+            { encoding: "utf-8", timeout: 60000, stdio: "pipe" }
+          );
+        }
+
+        await prisma.scene.update({ where: { id: scene.id }, data: { status: "complete", clipUrl: clipPath, error: null } });
+        const progress = Math.round(((i + 1) / scenesToRetry.length) * 100);
+        await prisma.pipelineJob.update({ where: { id: retryJob.id }, data: { progress } });
+      } catch (err: any) {
+        const isBilling = err.name === "ReplicateBillingError";
+        const errorPrefix = isBilling ? "[BILLING] " : "";
+        const sceneError = errorPrefix + (err.message?.slice(0, 500) || "Unknown error");
+        await prisma.scene.update({ where: { id: scene.id }, data: { status: "failed", error: sceneError } });
+        await pipeLog(projectId, retryJob.id, "retry_failed", "Scene " + scene.index + " retry FAILED: " + sceneError.slice(0, 200), "ERROR");
+        if (isBilling) {
+          await pipeLog(projectId, retryJob.id, "retry_failed", "BILLING ERROR: Cannot continue. Add credits at https://replicate.com/account/billing", "ERROR");
+          throw err;
+        }
+      }
+    }
+
+    await prisma.pipelineJob.update({
+      where: { id: retryJob.id },
+      data: { status: "complete", progress: 100, completedAt: new Date() },
+    });
+
+    const allScenes = await prisma.scene.findMany({ where: { projectId }, orderBy: { index: "asc" } });
+    const allComplete = allScenes.every(s => s.status === "complete");
+    if (allComplete) {
+      await pipeLog(projectId, retryJob.id, "retry_failed", "All scenes now complete. Re-stitching...");
+      const completedScenes = await prisma.scene.findMany({
+        where: { projectId, status: "complete" },
+        orderBy: { index: "asc" },
+        include: { audioTracks: { where: { status: "complete" } } },
+      });
+      let cumulativeTime = 0;
+      const stitchInputs: StitchInput[] = completedScenes.map((s) => {
+        const input: StitchInput = {
+          clipPath: s.clipUrl!,
+          audioTracks: s.audioTracks.map(at => ({ path: at.url!, startTime: at.startTime, volume: 0.5 })),
+          duration: s.duration,
+        };
+        cumulativeTime += s.duration;
+        return input;
+      });
+      const outputPath = await stitchVideo(stitchInputs, workDir, project.title);
+      await prisma.project.update({ where: { id: projectId }, data: { status: "complete", outputUrl: outputPath } });
+      await pipeLog(projectId, retryJob.id, "retry_failed", "Re-stitch complete. Output: " + outputPath);
+    } else {
+      const stillFailed = allScenes.filter(s => s.status === "failed").length;
+      await prisma.project.update({ where: { id: projectId }, data: { status: "failed" } });
+      await pipeLog(projectId, retryJob.id, "retry_failed", stillFailed + " scene(s) still failed after retry");
+    }
+  } catch (err: any) {
+    await prisma.project.update({ where: { id: projectId }, data: { status: "failed" } });
+    await prisma.pipelineJob.update({
+      where: { id: retryJob.id },
       data: { status: "failed", error: err.message?.slice(0, 500), completedAt: new Date() },
     });
     throw err;
