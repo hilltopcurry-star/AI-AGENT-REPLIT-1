@@ -1865,7 +1865,8 @@ async function replicateRunInner(model: string, input: Record<string, any>, toke
       );
     }
     const retryAfterHeader = createRes.headers.get("retry-after");
-    const retryAfter = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 0;
+    const retryAfterParsed = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 0;
+    const retryAfter = Number.isFinite(retryAfterParsed) ? retryAfterParsed : 0;
     const backoff = Math.max(retryAfter, Math.pow(2, attempt + 1)) * 1000;
     console.log("[VIDEO] Rate limited (429). retry_after=" + retryAfter + "s, backing off " + (backoff / 1000) + "s (attempt " + (attempt + 1) + "/" + MAX_RETRIES + ")");
     await new Promise(r => setTimeout(r, backoff));
@@ -1890,7 +1891,8 @@ async function replicateRunInner(model: string, input: Record<string, any>, toke
     });
     if (pollRes.status === 429) {
       const retryAfterHeader = pollRes.headers.get("retry-after");
-      const pollBackoff = Math.max(retryAfterHeader ? parseInt(retryAfterHeader, 10) : 5, 5) * 1000;
+      const parsedPollRetry = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 5;
+      const pollBackoff = Math.max(Number.isFinite(parsedPollRetry) ? parsedPollRetry : 5, 5) * 1000;
       console.log("[VIDEO] Poll rate limited, waiting " + (pollBackoff / 1000) + "s");
       await new Promise(r => setTimeout(r, pollBackoff));
       continue;
@@ -2558,7 +2560,8 @@ export async function runPipelineRetry(projectId: string, failedSceneIds: string
         await prisma.pipelineJob.update({ where: { id: retryJob.id }, data: { progress } });
       } catch (err: any) {
         const isBilling = err.name === "ReplicateBillingError";
-        const errorPrefix = isBilling ? "[BILLING] " : "";
+        const isRateLimit = err.name === "ReplicateRateLimitError";
+        const errorPrefix = isBilling ? "[BILLING] " : isRateLimit ? "[RATE_LIMIT] " : "";
         const sceneError = errorPrefix + (err.message?.slice(0, 500) || "Unknown error");
         await prisma.scene.update({ where: { id: scene.id }, data: { status: "failed", error: sceneError } });
         await pipeLog(projectId, retryJob.id, "retry_failed", "Scene " + scene.index + " retry FAILED: " + sceneError.slice(0, 200), "ERROR");
