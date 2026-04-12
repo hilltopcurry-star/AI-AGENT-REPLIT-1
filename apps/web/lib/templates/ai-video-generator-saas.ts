@@ -27,14 +27,15 @@ model Project {
   user        User     @relation(fields: [userId], references: [id])
   title       String
   script      String
-  status      String   @default("draft")
-  outputUrl   String?
-  totalScenes Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  scenes      Scene[]
-  pipelineJobs PipelineJob[]
-  characterRefs CharacterRef[]
+  status         String   @default("draft")
+  outputUrl      String?
+  totalScenes    Int      @default(0)
+  strictIdentity Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  scenes         Scene[]
+  pipelineJobs   PipelineJob[]
+  characterRefs  CharacterRef[]
 }
 
 model Scene {
@@ -559,6 +560,7 @@ export default function NewProject() {
   const [newCharGender, setNewCharGender] = useState("unspecified");
   const [newCharAge, setNewCharAge] = useState("adult");
   const [uploading, setUploading] = useState<string | null>(null);
+  const [strictIdentity, setStrictIdentity] = useState(false);
 
   function addCharacter() {
     if (!newCharName.trim()) return;
@@ -604,7 +606,7 @@ export default function NewProject() {
       const res = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim(), script: script.trim() }),
+        body: JSON.stringify({ title: title.trim(), script: script.trim(), strictIdentity }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
@@ -736,6 +738,33 @@ export default function NewProject() {
             </button>
           </div>
         </div>
+
+        {characters.length > 0 && characters.some(c => c.images.length > 0) && (
+          <div className="glass-card" style={{ padding: 20, marginBottom: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 14, display: "block", marginBottom: 4 }}>Strict Identity Mode</label>
+                <p style={{ color: "var(--text2)", fontSize: 12, margin: 0 }}>
+                  Uses face-preserving AI (InstantID) to generate keyframes matching your reference photos. Slower and costlier but ensures character faces match across all scenes.
+                </p>
+              </div>
+              <label data-testid="toggle-strict-identity" style={{ position: "relative", display: "inline-block", width: 48, height: 26, flexShrink: 0, marginLeft: 16, cursor: "pointer" }}>
+                <input type="checkbox" checked={strictIdentity} onChange={(e) => setStrictIdentity(e.target.checked)}
+                  style={{ opacity: 0, width: 0, height: 0, position: "absolute" }} />
+                <span style={{
+                  position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+                  background: strictIdentity ? "var(--accent2)" : "var(--border)",
+                  borderRadius: 13, transition: "background 0.2s",
+                }} />
+                <span style={{
+                  position: "absolute", top: 3, left: strictIdentity ? 25 : 3,
+                  width: 20, height: 20, background: "#fff", borderRadius: "50%",
+                  transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                }} />
+              </label>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="glass-card" style={{ padding: 16, marginBottom: 20, borderColor: "var(--error)", background: "rgba(239,68,68,0.08)" }}>
@@ -991,6 +1020,8 @@ interface Scene {
 interface ProjectData {
   id: string; title: string; script: string; status: string;
   outputUrl: string | null; totalScenes: number;
+  strictIdentity: boolean;
+  characterRefs: any[];
   scenes: Scene[];
   pipelineJobs: { id: string; stage: string; status: string; progress: number; error: string | null }[];
 }
@@ -1332,6 +1363,49 @@ export default function ProjectPage() {
         )}
       </div>
 
+      {project.characterRefs && project.characterRefs.length > 0 && (
+        <div className="glass-card" style={{ padding: 20, marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <span style={{ fontSize: 15, fontWeight: 700 }}>Character References</span>
+            {project.strictIdentity && (
+              <span data-testid="badge-strict-identity" style={{ fontSize: 10, fontWeight: 700, background: "rgba(99,102,241,0.15)", color: "var(--accent2)", padding: "2px 8px", borderRadius: 6, letterSpacing: "0.05em" }}>
+                STRICT IDENTITY
+              </span>
+            )}
+          </div>
+          <div style={{ display: "grid", gap: 10 }}>
+            {project.characterRefs.map((char: any) => (
+              <div key={char.id} data-testid={"debug-character-" + char.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", background: "var(--surface)", borderRadius: 8, border: "1px solid var(--border)" }}>
+                {char.images && char.images.length > 0 ? (
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {char.images.map((img: any, idx: number) => (
+                      <img key={idx} src={img.imageUrl} alt={char.name + " ref"} style={{ width: 40, height: 40, borderRadius: 6, objectFit: "cover", border: "1px solid var(--border)" }} />
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ width: 40, height: 40, borderRadius: 6, background: "var(--surface2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: "var(--text2)" }}>?</div>
+                )}
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{char.name}</div>
+                  <div style={{ fontSize: 11, color: "var(--text2)" }}>
+                    {char.gender} &middot; {char.ageGroup}
+                    {char.images && char.images.length > 0 ? " &middot; " + char.images.length + " ref image(s)" : " &middot; no images"}
+                    {project.strictIdentity && char.images && char.images.length > 0 && (
+                      <span style={{ color: "var(--accent2)" }}> &middot; InstantID will be used</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {!project.strictIdentity && project.characterRefs.some((c: any) => c.images && c.images.length > 0) && (
+            <div style={{ marginTop: 10, fontSize: 11, color: "var(--text2)", fontStyle: "italic" }}>
+              Tip: Enable &quot;Strict Identity Mode&quot; when creating a project to use face-preserving AI for character consistency.
+            </div>
+          )}
+        </div>
+      )}
+
       {total > 0 && (
         <div style={{ marginBottom: 28 }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
@@ -1357,8 +1431,15 @@ export default function ProjectPage() {
                   {scene.keyframeUrl && !scene.firstFrameUrl && (
                     <div data-testid={"keyframe-scene-" + scene.index} style={{ marginBottom: 12, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", position: "relative" }}>
                       <img src={scene.keyframeUrl} alt={"Keyframe for scene " + (scene.index + 1)} style={{ width: "100%", height: "auto", maxHeight: 200, objectFit: "cover", display: "block" }} />
-                      <div style={{ position: "absolute", top: 8, left: 8, background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
-                        KEYFRAME
+                      <div style={{ position: "absolute", top: 8, left: 8, display: "flex", gap: 4 }}>
+                        <span style={{ background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
+                          KEYFRAME
+                        </span>
+                        {project.strictIdentity && project.characterRefs && project.characterRefs.some((c: any) => c.images && c.images.length > 0) && (
+                          <span data-testid={"badge-identity-scene-" + scene.index} style={{ background: "rgba(99,102,241,0.8)", color: "#fff", fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
+                            InstantID
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1737,7 +1818,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { title, script, userId } = body;
+    const { title, script, userId, strictIdentity } = body;
     if (!title || !script) {
       return NextResponse.json({ error: "title and script are required" }, { status: 400 });
     }
@@ -1746,7 +1827,7 @@ export async function POST(req: NextRequest) {
       user = await prisma.user.create({ data: { email: "default@videogen.app", name: "Default User" } });
     }
     const project = await prisma.project.create({
-      data: { title, script, userId: userId || user.id },
+      data: { title, script, userId: userId || user.id, strictIdentity: !!strictIdentity },
     });
     return NextResponse.json(project, { status: 201 });
   } catch (err: any) {
@@ -1768,7 +1849,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     include: {
       scenes: { orderBy: { index: "asc" }, include: { audioTracks: true } },
       pipelineJobs: { orderBy: { createdAt: "desc" } },
-      characterRefs: true,
+      characterRefs: { include: { images: true } },
     },
   });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -2478,6 +2559,92 @@ export async function generateKeyframeImage(
   return url;
 }
 
+const IDENTITY_MODEL = "zsxkib/instant-id:d90ddb61aa7bd82fcbe7e5fafc3f8e34ee753cfead3c1a30d855616e35af3f0e";
+
+export interface IdentityKeyframeResult {
+  url: string;
+  faceImageUsed: string;
+  characterName: string;
+  method: string;
+}
+
+export async function generateIdentityKeyframe(
+  sceneDescription: string,
+  environment: string,
+  mood: string,
+  faceImageUrl: string,
+  characterName: string
+): Promise<IdentityKeyframeResult> {
+  const token = process.env.REPLICATE_API_TOKEN;
+  if (!token) throw new Error("REPLICATE_API_TOKEN not configured");
+
+  const imagePrompt = [
+    STYLE + " still frame.",
+    "Scene: " + sceneDescription,
+    "Environment: " + environment,
+    "Mood/Lighting: " + mood,
+    "A person named " + characterName + " in the scene.",
+    "Style: photorealistic, cinematic, high quality, 4K, NOT cartoon, NOT anime.",
+    "Single high-resolution keyframe photograph preserving the exact face identity from the reference.",
+  ].join(" ");
+
+  const negativePrompt = "cartoon, anime, illustration, painting, drawing, deformed, ugly, blurry, low quality, watermark, text, logo";
+
+  console.log("[IDENTITY-KEYFRAME] Generating identity-preserving keyframe for character=" + characterName + " model=" + IDENTITY_MODEL.split(":")[0] + " prompt=" + imagePrompt.slice(0, 100) + "...");
+
+  const input: Record<string, any> = {
+    image: faceImageUrl,
+    prompt: imagePrompt,
+    negative_prompt: negativePrompt,
+    width: 1280,
+    height: 720,
+    ip_adapter_scale: 0.8,
+    controlnet_conditioning_scale: 0.8,
+    num_inference_steps: 30,
+    guidance_scale: 5,
+    seed: 0,
+    scheduler: "EulerDiscreteScheduler",
+  };
+
+  const output = await replicateRun(IDENTITY_MODEL, input, token);
+
+  let url = "";
+  if (typeof output === "string") {
+    url = output;
+  } else if (Array.isArray(output) && output.length > 0) {
+    url = typeof output[0] === "string" ? output[0] : (output[0] as any)?.url || String(output[0]);
+  } else if (output && typeof output === "object" && "url" in (output as any)) {
+    url = (output as any).url;
+  } else {
+    url = String(output);
+  }
+
+  if (!url || !url.startsWith("http")) {
+    throw new Error("Identity keyframe generation returned invalid URL: " + String(url).slice(0, 200));
+  }
+
+  console.log("[IDENTITY-KEYFRAME] Generated identity keyframe for " + characterName + ": " + url.slice(0, 100) + "...");
+  return { url, faceImageUsed: faceImageUrl, characterName, method: "instant-id" };
+}
+
+export interface CharacterFaceRef {
+  name: string;
+  gender: string;
+  ageGroup: string;
+  faceImageUrl?: string;
+}
+
+export interface VideoGenDebug {
+  identityMethod?: string;
+  identityCharacter?: string;
+  identityFaceImageUsed?: string;
+  keyframeSource: "identity-model" | "flux" | "first-frame-override";
+}
+
+export interface VideoGenResultExtended extends VideoGenResult {
+  debug: VideoGenDebug;
+}
+
 export async function generateVideoClip(
   sceneDescription: string,
   environment: string,
@@ -2486,15 +2653,35 @@ export async function generateVideoClip(
   durationHint: number,
   referenceImageUrl?: string,
   firstFrameOverrideUrl?: string,
-  characterRefs?: { name: string; gender: string; ageGroup: string }[]
-): Promise<VideoGenResult> {
+  characterRefs?: CharacterFaceRef[],
+  strictIdentity?: boolean
+): Promise<VideoGenResultExtended> {
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) throw new Error("REPLICATE_API_TOKEN not configured");
 
   let keyframeUrl: string;
+  const debug: VideoGenDebug = { keyframeSource: "flux" };
+
   if (firstFrameOverrideUrl) {
     console.log("[VIDEO] Using first-frame override, skipping keyframe generation: " + firstFrameOverrideUrl.slice(0, 100));
     keyframeUrl = firstFrameOverrideUrl;
+    debug.keyframeSource = "first-frame-override";
+  } else if (strictIdentity && characterRefs && characterRefs.length > 0) {
+    const faceChar = characterRefs.find(c => c.faceImageUrl);
+    if (faceChar && faceChar.faceImageUrl) {
+      console.log("[VIDEO] Strict identity mode: using InstantID for character=" + faceChar.name + " face=" + faceChar.faceImageUrl.slice(0, 80));
+      const identityResult = await generateIdentityKeyframe(
+        sceneDescription, environment, mood, faceChar.faceImageUrl, faceChar.name
+      );
+      keyframeUrl = identityResult.url;
+      debug.keyframeSource = "identity-model";
+      debug.identityMethod = identityResult.method;
+      debug.identityCharacter = identityResult.characterName;
+      debug.identityFaceImageUsed = identityResult.faceImageUsed;
+    } else {
+      console.log("[VIDEO] Strict identity enabled but no face images found, falling back to Flux");
+      keyframeUrl = await generateKeyframeImage(sceneDescription, environment, mood, referenceImageUrl);
+    }
   } else {
     keyframeUrl = await generateKeyframeImage(sceneDescription, environment, mood, referenceImageUrl);
   }
@@ -2535,7 +2722,7 @@ export async function generateVideoClip(
     throw new Error("Video generation returned invalid URL: " + String(url).slice(0, 200));
   }
 
-  return { url, durationSec: durationHint, keyframeUrl };
+  return { url, durationSec: durationHint, keyframeUrl, debug };
 }
 
 export function getProviderLimits(): { maxClipSeconds: number; maxTotalMinutes: number; note: string } {
@@ -2820,7 +3007,7 @@ export function downloadFile(url: string, destPath: string): Promise<void> {
     {
       path: "lib/pipeline.ts",
       content: `import { prisma } from "./prisma";
-import { generateVideoClip, isVideoProviderConfigured } from "./video-provider";
+import { generateVideoClip, isVideoProviderConfigured, type CharacterFaceRef } from "./video-provider";
 import { processTimelineEvents, generateSFX, detectSFXTypes } from "./audio-provider";
 import type { AudioResult } from "./audio-provider";
 import { validateTimelineEvents } from "./scene-contract";
@@ -2905,12 +3092,19 @@ export async function runPipeline(projectId: string): Promise<void> {
           if (isVideoProviderConfigured()) {
             const charRefs = await prisma.characterRef.findMany({
               where: { projectId },
-              select: { name: true, gender: true, ageGroup: true },
+              include: { images: true },
             });
+            const faceRefs: CharacterFaceRef[] = charRefs.map((c: any) => ({
+              name: c.name,
+              gender: c.gender,
+              ageGroup: c.ageGroup,
+              faceImageUrl: c.images && c.images.length > 0 ? c.images[0].imageUrl : undefined,
+            }));
             const result = await generateVideoClip(
               scene.description, scene.environment, scene.mood, cameraHint, scene.duration,
               undefined, scene.firstFrameUrl || undefined,
-              charRefs.length > 0 ? charRefs : undefined
+              faceRefs.length > 0 ? faceRefs : undefined,
+              project.strictIdentity
             );
             clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
             await downloadFile(result.url, clipPath);
@@ -2929,7 +3123,8 @@ export async function runPipeline(projectId: string): Promise<void> {
             if (result.keyframeUrl) {
               await prisma.scene.update({ where: { id: scene.id }, data: { keyframeUrl: result.keyframeUrl } });
             }
-            await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " clip generated from Replicate (keyframe=" + (result.keyframeUrl ? "yes" : "no") + ", firstFrame=" + (scene.firstFrameUrl ? "override" : "generated") + ", events: " + events.length + ")");
+            const debugStr = result.debug ? " identity=" + (result.debug.identityMethod || "none") + " keyframeSrc=" + result.debug.keyframeSource + (result.debug.identityCharacter ? " char=" + result.debug.identityCharacter : "") : "";
+            await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " clip generated from Replicate (keyframe=" + (result.keyframeUrl ? "yes" : "no") + ", firstFrame=" + (scene.firstFrameUrl ? "override" : "generated") + ", events: " + events.length + debugStr + ")");
           } else {
             clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
             const demoColors = ["0x1e40af", "0x0e7490", "0x7e22ce", "0xb45309", "0x15803d", "0xbe185d", "0x0369a1", "0x4338ca"];
@@ -3167,12 +3362,20 @@ export async function runPipelineRetry(projectId: string, failedSceneIds: string
         if (isVideoProviderConfigured()) {
           const charRefs = await prisma.characterRef.findMany({
             where: { projectId },
-            select: { name: true, gender: true, ageGroup: true },
+            include: { images: true },
           });
+          const faceRefs: CharacterFaceRef[] = charRefs.map((c: any) => ({
+            name: c.name,
+            gender: c.gender,
+            ageGroup: c.ageGroup,
+            faceImageUrl: c.images && c.images.length > 0 ? c.images[0].imageUrl : undefined,
+          }));
+          const retryProject = await prisma.project.findUnique({ where: { id: projectId }, select: { strictIdentity: true } });
           const result = await generateVideoClip(
             scene.description, scene.environment, scene.mood, cameraHint, scene.duration,
             undefined, scene.firstFrameUrl || undefined,
-            charRefs.length > 0 ? charRefs : undefined
+            faceRefs.length > 0 ? faceRefs : undefined,
+            retryProject?.strictIdentity
           );
           clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
           await downloadFile(result.url, clipPath);
@@ -3190,7 +3393,8 @@ export async function runPipelineRetry(projectId: string, failedSceneIds: string
           if (result.keyframeUrl) {
             await prisma.scene.update({ where: { id: scene.id }, data: { keyframeUrl: result.keyframeUrl } });
           }
-          await pipeLog(projectId, retryJob.id, "retry_failed", "Scene " + scene.index + " retried successfully from Replicate (keyframe=" + (result.keyframeUrl ? "yes" : "no") + ", firstFrame=" + (scene.firstFrameUrl ? "override" : "generated") + ")");
+          const debugStr = result.debug ? " identity=" + (result.debug.identityMethod || "none") + " keyframeSrc=" + result.debug.keyframeSource : "";
+          await pipeLog(projectId, retryJob.id, "retry_failed", "Scene " + scene.index + " retried successfully from Replicate (keyframe=" + (result.keyframeUrl ? "yes" : "no") + ", firstFrame=" + (scene.firstFrameUrl ? "override" : "generated") + debugStr + ")");
         } else {
           clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
           const bgColor = "0x1e40af";
