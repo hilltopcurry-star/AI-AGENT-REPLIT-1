@@ -132,11 +132,16 @@ model PipelineLog {
     },
     {
       path: "next.config.js",
-      content: `/** @type {import('next').NextConfig} */
+      content: `const path = require("path");
+/** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
   experimental: {
     serverActions: { bodySizeLimit: "50mb" },
+  },
+  webpack: (config) => {
+    config.resolve.alias["@"] = path.resolve(__dirname);
+    return config;
   },
 };
 module.exports = nextConfig;
@@ -1061,7 +1066,7 @@ function FirstFrameDropZone({ projectId, scene, onUpdate }: { projectId: string;
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }}
         data-testid={"input-first-frame-" + scene.index}
         onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
-      \\u{1F5BC} Set first frame override (click, drop, or paste)
+      &#128444; Set first frame override (click, drop, or paste)
     </div>
   );
 }
