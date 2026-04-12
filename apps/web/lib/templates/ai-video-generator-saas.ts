@@ -538,14 +538,18 @@ interface ServiceInfo {
   envVar: string;
   helpUrl: string;
   description: string;
+  error?: string;
+  username?: string;
+  baseUrl?: string;
 }
 interface AIStatus {
   ready: boolean;
   demoMode: boolean;
+  hasInvalidTokens: boolean;
   videoModel: string;
   videoStyle: string;
   services: ServiceInfo[];
-  missing: { name: string; envVar: string; helpUrl: string }[];
+  missing: { name: string; envVar: string; helpUrl: string; error?: string }[];
   setupInstructions: string;
   deployTarget: string;
 }
@@ -606,41 +610,84 @@ export default function SetupPage() {
             )}
           </div>
 
-          <div style={{ display: "grid", gap: 12, marginBottom: 24 }}>
-            {status.services.map((svc) => (
-              <div key={svc.key} className="glass-card" style={{ padding: 20, borderColor: svc.status === "configured" ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.3)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ fontWeight: 700, fontSize: 15 }}>{svc.name}</span>
-                    {svc.provider !== "none" && (
-                      <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 12, background: "var(--accent-glow)", color: "var(--accent2)", fontWeight: 600 }}>{svc.provider}</span>
-                    )}
-                  </div>
-                  <span className="status-badge" style={{ background: svc.status === "configured" ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)", color: svc.status === "configured" ? "#4ade80" : "#f87171" }}>
-                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: svc.status === "configured" ? "#22c55e" : "#ef4444", display: "inline-block" }} />
-                    {svc.status}
-                  </span>
+          {status.hasInvalidTokens && (
+            <div className="glass-card" style={{ padding: 16, marginBottom: 20, borderColor: "rgba(245,158,11,0.5)", background: "rgba(245,158,11,0.06)" }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <span style={{ fontSize: 18 }}>&#9888;</span>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#fbbf24" }}>Invalid API Token Detected</div>
+                  <div style={{ color: "var(--text2)", fontSize: 13 }}>One or more tokens are present but failed authentication. Replace them with valid keys.</div>
                 </div>
-                <p style={{ color: "var(--text2)", fontSize: 13, marginBottom: 8 }}>{svc.description}</p>
-                {svc.status === "missing" && (
-                  <div style={{ padding: "12px 14px", background: "var(--surface2)", borderRadius: 8, fontSize: 13 }}>
-                    <div style={{ marginBottom: 6 }}>
-                      <span style={{ fontWeight: 600, color: "var(--text)" }}>Required:</span>
-                      <code style={{ marginLeft: 8, padding: "2px 8px", background: "var(--surface)", borderRadius: 4, fontFamily: "monospace", fontSize: 12, color: "var(--accent2)" }}>{svc.envVar}</code>
-                    </div>
-                    <div style={{ marginBottom: 8 }}>
-                      <span style={{ fontWeight: 600, color: "var(--text)" }}>Set via Fly:</span>
-                      <code style={{ display: "block", marginTop: 4, padding: "8px 12px", background: "var(--surface)", borderRadius: 4, fontFamily: "monospace", fontSize: 12, color: "var(--text2)", wordBreak: "break-all" }}>
-                        flyctl secrets set {svc.envVar}=&lt;your-key&gt; -a &lt;app-name&gt;
-                      </code>
-                    </div>
-                    <a href={svc.helpUrl} target="_blank" rel="noopener" style={{ color: "var(--accent2)", fontSize: 13, textDecoration: "none" }}>
-                      &#8594; Get API key
-                    </a>
-                  </div>
-                )}
               </div>
-            ))}
+            </div>
+          )}
+
+          <div style={{ display: "grid", gap: 12, marginBottom: 24 }}>
+            {status.services.map((svc: any) => {
+              const isGood = svc.status === "valid" || svc.status === "configured";
+              const isInvalid = svc.status === "invalid";
+              const borderColor = isGood ? "rgba(34,197,94,0.2)" : isInvalid ? "rgba(245,158,11,0.4)" : "rgba(239,68,68,0.3)";
+              const badgeBg = isGood ? "rgba(34,197,94,0.12)" : isInvalid ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.12)";
+              const badgeColor = isGood ? "#4ade80" : isInvalid ? "#fbbf24" : "#f87171";
+              const dotColor = isGood ? "#22c55e" : isInvalid ? "#f59e0b" : "#ef4444";
+              const statusLabel = isGood ? (svc.status === "valid" ? "valid" : "configured") : isInvalid ? "invalid" : "missing";
+
+              return (
+                <div key={svc.key} className="glass-card" style={{ padding: 20, borderColor }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontWeight: 700, fontSize: 15 }}>{svc.name}</span>
+                      {svc.provider !== "none" && (
+                        <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 12, background: "var(--accent-glow)", color: "var(--accent2)", fontWeight: 600 }}>{svc.provider}</span>
+                      )}
+                    </div>
+                    <span className="status-badge" style={{ background: badgeBg, color: badgeColor }}>
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotColor, display: "inline-block" }} />
+                      {statusLabel}
+                    </span>
+                  </div>
+                  <p style={{ color: "var(--text2)", fontSize: 13, marginBottom: 8 }}>{svc.description}</p>
+                  {svc.baseUrl && (
+                    <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 6 }}>
+                      API: <code style={{ padding: "1px 6px", background: "var(--surface)", borderRadius: 4, fontFamily: "monospace", fontSize: 11 }}>{svc.baseUrl}</code>
+                      {svc.username && <span style={{ marginLeft: 8, color: "#4ade80" }}>&#10003; {svc.username}</span>}
+                    </div>
+                  )}
+                  {isInvalid && (
+                    <div style={{ padding: "12px 14px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 8, fontSize: 13, marginBottom: 8 }}>
+                      <div style={{ fontWeight: 600, color: "#fbbf24", marginBottom: 4 }}>&#9888; Token present but invalid</div>
+                      <div style={{ color: "var(--text2)", marginBottom: 8 }}>{svc.error || "Authentication failed"}</div>
+                      <div>
+                        <span style={{ fontWeight: 600, color: "var(--text)" }}>Fix:</span>
+                        <code style={{ display: "block", marginTop: 4, padding: "8px 12px", background: "var(--surface)", borderRadius: 4, fontFamily: "monospace", fontSize: 12, color: "var(--text2)", wordBreak: "break-all" }}>
+                          flyctl secrets set {svc.envVar}=&lt;new-valid-key&gt; -a &lt;app-name&gt;
+                        </code>
+                      </div>
+                      <a href={svc.helpUrl} target="_blank" rel="noopener" style={{ color: "var(--accent2)", fontSize: 13, textDecoration: "none", marginTop: 8, display: "inline-block" }}>
+                        &#8594; Get a new API key
+                      </a>
+                    </div>
+                  )}
+                  {svc.status === "missing" && (
+                    <div style={{ padding: "12px 14px", background: "var(--surface2)", borderRadius: 8, fontSize: 13 }}>
+                      <div style={{ marginBottom: 6 }}>
+                        <span style={{ fontWeight: 600, color: "var(--text)" }}>Required:</span>
+                        <code style={{ marginLeft: 8, padding: "2px 8px", background: "var(--surface)", borderRadius: 4, fontFamily: "monospace", fontSize: 12, color: "var(--accent2)" }}>{svc.envVar}</code>
+                      </div>
+                      <div style={{ marginBottom: 8 }}>
+                        <span style={{ fontWeight: 600, color: "var(--text)" }}>Set via Fly:</span>
+                        <code style={{ display: "block", marginTop: 4, padding: "8px 12px", background: "var(--surface)", borderRadius: 4, fontFamily: "monospace", fontSize: 12, color: "var(--text2)", wordBreak: "break-all" }}>
+                          flyctl secrets set {svc.envVar}=&lt;your-key&gt; -a &lt;app-name&gt;
+                        </code>
+                      </div>
+                      <a href={svc.helpUrl} target="_blank" rel="noopener" style={{ color: "var(--accent2)", fontSize: 13, textDecoration: "none" }}>
+                        &#8594; Get API key
+                      </a>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           <div className="glass-card" style={{ padding: 20, marginBottom: 24 }}>
@@ -1087,6 +1134,38 @@ export async function GET() {
       path: "app/api/ai-status/route.ts",
       content: `import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
+
+async function checkReplicateToken(token: string): Promise<{ valid: boolean; error?: string; username?: string }> {
+  try {
+    const res = await fetch("https://api.replicate.com/v1/account", {
+      headers: { "Authorization": "Bearer " + token },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return { valid: true, username: data.username || data.github_url || "authenticated" };
+    }
+    if (res.status === 401) {
+      return { valid: false, error: "Token is invalid or expired (401 Unauthenticated)" };
+    }
+    return { valid: false, error: "Replicate API returned " + res.status };
+  } catch (err: any) {
+    return { valid: false, error: "Network error: " + (err.message || "unknown") };
+  }
+}
+
+async function checkOpenAIKey(key: string): Promise<{ valid: boolean; error?: string }> {
+  try {
+    const res = await fetch("https://api.openai.com/v1/models", {
+      headers: { "Authorization": "Bearer " + key },
+    });
+    if (res.ok) return { valid: true };
+    if (res.status === 401) return { valid: false, error: "Key is invalid or expired (401)" };
+    return { valid: false, error: "OpenAI API returned " + res.status };
+  } catch (err: any) {
+    return { valid: false, error: "Network error: " + (err.message || "unknown") };
+  }
+}
+
 export async function GET() {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
@@ -1095,38 +1174,77 @@ export async function GET() {
   const videoStyle = process.env.VIDEO_STYLE || "photorealistic cinematic";
   const isDemoMode = process.env.DEMO_MODE === "true";
 
+  let replicateCheck: { valid: boolean; error?: string; username?: string } | null = null;
+  let openaiCheck: { valid: boolean; error?: string } | null = null;
+
+  if (replicateToken) {
+    replicateCheck = await checkReplicateToken(replicateToken);
+    console.log("[AI-STATUS] Replicate token check: valid=" + replicateCheck.valid +
+      (replicateCheck.username ? " user=" + replicateCheck.username : "") +
+      (replicateCheck.error ? " error=" + replicateCheck.error : "") +
+      " tokenLength=" + replicateToken.length +
+      " baseUrl=https://api.replicate.com/v1");
+  }
+
+  if (openaiKey) {
+    openaiCheck = await checkOpenAIKey(openaiKey);
+    console.log("[AI-STATUS] OpenAI key check: valid=" + openaiCheck.valid +
+      (openaiCheck.error ? " error=" + openaiCheck.error : "") +
+      " keyLength=" + openaiKey.length +
+      " baseUrl=https://api.openai.com/v1");
+  }
+
+  function tokenStatus(present: boolean, check: { valid: boolean; error?: string } | null): string {
+    if (!present) return "missing";
+    if (!check) return "configured";
+    return check.valid ? "valid" : "invalid";
+  }
+
+  const replicateStatus = tokenStatus(!!replicateToken, replicateCheck);
+  const scriptParserPresent = !!(anthropicKey || openaiKey);
+  const openaiStatus = tokenStatus(!!openaiKey, openaiCheck);
+  const scriptStatus = anthropicKey ? "configured" : openaiStatus;
+
   const services = [
     {
       name: "Script Parser",
       key: "scriptParser",
-      status: anthropicKey ? "configured" : (openaiKey ? "configured" : "missing"),
+      status: scriptParserPresent ? (anthropicKey ? "configured" : openaiStatus) : "missing",
       provider: anthropicKey ? "anthropic" : (openaiKey ? "openai" : "none"),
       envVar: "ANTHROPIC_API_KEY or OPENAI_API_KEY",
       helpUrl: "https://console.anthropic.com/settings/keys",
       description: "Parses scripts into structured scenes with timeline events",
+      error: !anthropicKey && openaiCheck?.error ? openaiCheck.error : undefined,
+      baseUrl: anthropicKey ? "https://api.anthropic.com/v1" : (openaiKey ? "https://api.openai.com/v1" : undefined),
     },
     {
       name: "Video Generator",
       key: "videoProvider",
-      status: replicateToken ? "configured" : "missing",
+      status: replicateStatus,
       provider: replicateToken ? "replicate" : "none",
       envVar: "REPLICATE_API_TOKEN",
       helpUrl: "https://replicate.com/account/api-tokens",
       description: "Generates video clips from scene descriptions using " + videoModel,
+      error: replicateCheck?.error,
+      username: replicateCheck?.username,
+      baseUrl: replicateToken ? "https://api.replicate.com/v1" : undefined,
     },
     {
       name: "Text-to-Speech",
       key: "tts",
-      status: openaiKey ? "configured" : "missing",
+      status: openaiStatus === "missing" ? "missing" : openaiStatus,
       provider: openaiKey ? "openai" : "none",
       envVar: "OPENAI_API_KEY",
       helpUrl: "https://platform.openai.com/api-keys",
       description: "Generates voiceover narration and dialogue audio",
+      error: openaiCheck?.error,
+      baseUrl: openaiKey ? "https://api.openai.com/v1" : undefined,
     },
   ];
 
-  const allConfigured = services.every(s => s.status === "configured");
-  const missingServices = services.filter(s => s.status === "missing");
+  const allWorking = services.every(s => s.status === "valid" || s.status === "configured");
+  const hasInvalid = services.some(s => s.status === "invalid");
+  const missingServices = services.filter(s => s.status === "missing" || s.status === "invalid");
 
   return NextResponse.json({
     scriptParser: services[0].status,
@@ -1138,12 +1256,14 @@ export async function GET() {
     tts: services[2].status,
     realisticMode: true,
     demoMode: isDemoMode,
-    ready: allConfigured,
+    ready: allWorking && !hasInvalid,
+    hasInvalidTokens: hasInvalid,
     services,
     missing: missingServices.map(s => ({
       name: s.name,
       envVar: s.envVar,
       helpUrl: s.helpUrl,
+      error: s.error,
     })),
     deployTarget: "fly",
     setupInstructions: missingServices.length > 0
