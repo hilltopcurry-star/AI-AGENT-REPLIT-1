@@ -52,10 +52,12 @@ model Scene {
   timelineJson  String   @default("[]")
   clipUrl       String?
   keyframeUrl   String?
+  firstFrameUrl String?
   status        String   @default("pending")
   error         String?
   createdAt     DateTime @default(now())
   audioTracks   AudioTrack[]
+  firstFrame    SceneFirstFrame?
 }
 
 model AudioTrack {
@@ -76,7 +78,31 @@ model CharacterRef {
   projectId String
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   name      String
+  gender    String   @default("unspecified")
+  ageGroup  String   @default("adult")
   imageData String
+  images    CharacterImage[]
+  createdAt DateTime @default(now())
+}
+
+model CharacterImage {
+  id           String       @id @default(cuid())
+  characterId  String
+  character    CharacterRef @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  role         String       @default("face")
+  imageUrl     String
+  mime         String       @default("image/jpeg")
+  size         Int          @default(0)
+  createdAt    DateTime     @default(now())
+}
+
+model SceneFirstFrame {
+  id        String   @id @default(cuid())
+  sceneId   String   @unique
+  scene     Scene    @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+  imageUrl  String
+  mime      String   @default("image/jpeg")
+  size      Int      @default(0)
   createdAt DateTime @default(now())
 }
 
@@ -447,9 +473,75 @@ export default async function Home() {
     {
       path: "app/new/page.tsx",
       content: `"use client";
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 export const dynamic = "force-dynamic";
+
+interface CharacterDraft {
+  id: string;
+  name: string;
+  gender: string;
+  ageGroup: string;
+  images: { url: string; role: string }[];
+}
+
+async function uploadImage(file: File): Promise<{ url: string; mime: string; size: number }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/uploads/image", { method: "POST", body: form });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+function ImageDropZone({ onImage, label, testId }: { onImage: (file: File) => void; label: string; testId: string }) {
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith("image/")) onImage(file);
+  }, [onImage]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith("image/")) {
+        const file = items[i].getAsFile();
+        if (file) { onImage(file); break; }
+      }
+    }
+  }, [onImage]);
+
+  return (
+    <div
+      data-testid={testId}
+      onDrop={handleDrop}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onPaste={handlePaste}
+      tabIndex={0}
+      onClick={() => inputRef.current?.click()}
+      style={{
+        border: "2px dashed " + (dragOver ? "var(--accent)" : "var(--border)"),
+        borderRadius: 10, padding: 16, textAlign: "center", cursor: "pointer",
+        background: dragOver ? "rgba(99,102,241,0.06)" : "transparent",
+        transition: "all 0.2s",
+      }}
+    >
+      <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }}
+        data-testid={testId + "-input"}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) onImage(f); e.target.value = ""; }} />
+      <div style={{ fontSize: 13, color: "var(--text2)" }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 4, opacity: 0.6 }}>
+        Click, drag & drop, or paste (Ctrl+V)
+      </div>
+    </div>
+  );
+}
 
 export default function NewProject() {
   const router = useRouter();
@@ -457,6 +549,46 @@ export default function NewProject() {
   const [script, setScript] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [characters, setCharacters] = useState<CharacterDraft[]>([]);
+  const [newCharName, setNewCharName] = useState("");
+  const [newCharGender, setNewCharGender] = useState("unspecified");
+  const [newCharAge, setNewCharAge] = useState("adult");
+  const [uploading, setUploading] = useState<string | null>(null);
+
+  function addCharacter() {
+    if (!newCharName.trim()) return;
+    setCharacters(prev => [...prev, {
+      id: "draft-" + Date.now(),
+      name: newCharName.trim(),
+      gender: newCharGender,
+      ageGroup: newCharAge,
+      images: [],
+    }]);
+    setNewCharName("");
+  }
+
+  function removeCharacter(id: string) {
+    setCharacters(prev => prev.filter(c => c.id !== id));
+  }
+
+  async function addCharImage(charId: string, file: File) {
+    setUploading(charId);
+    try {
+      const result = await uploadImage(file);
+      setCharacters(prev => prev.map(c =>
+        c.id === charId ? { ...c, images: [...c.images, { url: result.url, role: "face" }] } : c
+      ));
+    } catch (err: any) {
+      setError("Upload failed: " + err.message);
+    }
+    setUploading(null);
+  }
+
+  function removeCharImage(charId: string, idx: number) {
+    setCharacters(prev => prev.map(c =>
+      c.id === charId ? { ...c, images: c.images.filter((_, i) => i !== idx) } : c
+    ));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -471,6 +603,25 @@ export default function NewProject() {
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
+
+      for (const char of characters) {
+        const charRes = await fetch("/api/projects/" + data.id + "/characters", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: char.name, gender: char.gender, ageGroup: char.ageGroup }),
+        });
+        if (charRes.ok) {
+          const created = await charRes.json();
+          for (const img of char.images) {
+            await fetch("/api/projects/" + data.id + "/characters/" + created.id + "/image", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ imageUrl: img.url, role: img.role }),
+            });
+          }
+        }
+      }
+
       router.push("/project/" + data.id);
     } catch (err: any) {
       setError(err.message || "Failed to create project");
@@ -507,6 +658,80 @@ export default function NewProject() {
             Separate scenes with blank lines or "Scene N:" markers.
           </p>
         </div>
+
+        <div className="glass-card" style={{ padding: 28, marginBottom: 20 }}>
+          <label style={{ display: "block", marginBottom: 12, fontWeight: 600, fontSize: 14 }}>Characters (optional)</label>
+          <p style={{ color: "var(--text2)", fontSize: 12, marginBottom: 16 }}>
+            Add character references with face/body images for consistent identity across scenes
+          </p>
+          {characters.map((char) => (
+            <div key={char.id} data-testid={"card-character-" + char.name} style={{
+              border: "1px solid var(--border)", borderRadius: 10, padding: 16, marginBottom: 12, background: "var(--surface)"
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>
+                  {char.name}
+                  <span style={{ fontWeight: 400, fontSize: 12, color: "var(--text2)", marginLeft: 8 }}>
+                    {char.gender} &middot; {char.ageGroup}
+                  </span>
+                </div>
+                <button type="button" data-testid={"button-remove-character-" + char.name}
+                  onClick={() => removeCharacter(char.id)}
+                  style={{ background: "none", border: "none", color: "var(--error)", cursor: "pointer", fontSize: 13, padding: "4px 8px" }}>
+                  Remove
+                </button>
+              </div>
+              {char.images.length > 0 && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                  {char.images.map((img, idx) => (
+                    <div key={idx} data-testid={"thumbnail-character-" + char.name + "-" + idx}
+                      style={{ position: "relative", width: 72, height: 72, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
+                      <img src={img.url} alt={char.name + " ref"} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <button type="button" data-testid={"button-remove-image-" + char.name + "-" + idx}
+                        onClick={() => removeCharImage(char.id, idx)}
+                        style={{ position: "absolute", top: 2, right: 2, width: 18, height: 18, borderRadius: "50%",
+                          background: "rgba(0,0,0,0.7)", color: "#fff", border: "none", cursor: "pointer", fontSize: 11, lineHeight: "18px", padding: 0 }}>
+                        &#215;
+                      </button>
+                      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.6)",
+                        color: "#fff", fontSize: 9, textAlign: "center", padding: "1px 0" }}>
+                        {img.role}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {uploading === char.id ? (
+                <div style={{ fontSize: 12, color: "var(--accent2)", padding: 8 }}>Uploading...</div>
+              ) : (
+                <ImageDropZone onImage={(f) => addCharImage(char.id, f)} label="Add reference image" testId={"dropzone-character-" + char.name} />
+              )}
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input data-testid="input-character-name" value={newCharName} onChange={(e) => setNewCharName(e.target.value)}
+              placeholder="Character name" style={{ flex: 1, minWidth: 120 }} />
+            <select data-testid="select-character-gender" value={newCharGender} onChange={(e) => setNewCharGender(e.target.value)}
+              style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 13 }}>
+              <option value="unspecified">Gender</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other</option>
+            </select>
+            <select data-testid="select-character-age" value={newCharAge} onChange={(e) => setNewCharAge(e.target.value)}
+              style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: 13 }}>
+              <option value="child">Child</option>
+              <option value="teen">Teen</option>
+              <option value="adult">Adult</option>
+              <option value="elderly">Elderly</option>
+            </select>
+            <button type="button" data-testid="button-add-character" onClick={addCharacter} className="btn-secondary"
+              style={{ fontSize: 13, padding: "8px 16px", whiteSpace: "nowrap" }}>
+              + Add
+            </button>
+          </div>
+        </div>
+
         {error && (
           <div className="glass-card" style={{ padding: 16, marginBottom: 20, borderColor: "var(--error)", background: "rgba(239,68,68,0.08)" }}>
             <p style={{ color: "var(--error)", fontSize: 14 }}>{error}</p>
@@ -746,7 +971,7 @@ export default function SetupPage() {
     {
       path: "app/project/[id]/page.tsx",
       content: `"use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 
 interface TimelineEventUI {
@@ -756,13 +981,89 @@ interface TimelineEventUI {
 interface Scene {
   id: string; index: number; description: string; environment: string;
   characters: string; actions: string; cameraCue: string; mood: string;
-  duration: number; timelineJson: string; clipUrl: string | null; keyframeUrl: string | null; status: string; error: string | null;
+  duration: number; timelineJson: string; clipUrl: string | null; keyframeUrl: string | null; firstFrameUrl: string | null; status: string; error: string | null;
 }
 interface ProjectData {
   id: string; title: string; script: string; status: string;
   outputUrl: string | null; totalScenes: number;
   scenes: Scene[];
   pipelineJobs: { id: string; stage: string; status: string; progress: number; error: string | null }[];
+}
+
+function FirstFrameDropZone({ projectId, scene, onUpdate }: { projectId: string; scene: Scene; onUpdate: () => void }) {
+  const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFile(file: File) {
+    if (!file.type.startsWith("image/")) return;
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const upRes = await fetch("/api/uploads/image", { method: "POST", body: form });
+      if (!upRes.ok) throw new Error("Upload failed");
+      const { url } = await upRes.json();
+      const setRes = await fetch("/api/projects/" + projectId + "/scenes/" + scene.id + "/first-frame", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl: url }),
+      });
+      if (!setRes.ok) throw new Error("Failed to set first frame");
+      onUpdate();
+    } catch (err) {
+      console.error("First frame upload error:", err);
+    }
+    setUploading(false);
+  }
+
+  async function removeFirstFrame() {
+    await fetch("/api/projects/" + projectId + "/scenes/" + scene.id + "/first-frame", { method: "DELETE" });
+    onUpdate();
+  }
+
+  if (scene.firstFrameUrl) {
+    return (
+      <div data-testid={"first-frame-scene-" + scene.index} style={{ marginBottom: 12, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", position: "relative" }}>
+        <img src={scene.firstFrameUrl} alt={"First frame override for scene " + (scene.index + 1)} style={{ width: "100%", height: "auto", maxHeight: 200, objectFit: "cover", display: "block" }} />
+        <div style={{ position: "absolute", top: 8, left: 8, background: "rgba(99,102,241,0.85)", color: "#fff", fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
+          FIRST FRAME OVERRIDE
+        </div>
+        <button data-testid={"button-remove-first-frame-" + scene.index} onClick={removeFirstFrame}
+          style={{ position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,0.7)", color: "#fff", border: "none",
+            borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 11 }}>
+          \\u2715 Remove
+        </button>
+      </div>
+    );
+  }
+
+  if (uploading) {
+    return <div style={{ fontSize: 12, color: "var(--accent2)", padding: 8, marginBottom: 8 }}>Uploading first frame...</div>;
+  }
+
+  return (
+    <div
+      data-testid={"dropzone-first-frame-" + scene.index}
+      onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onPaste={(e) => { const items = e.clipboardData.items; for (let i = 0; i < items.length; i++) { if (items[i].type.startsWith("image/")) { const f = items[i].getAsFile(); if (f) handleFile(f); break; } } }}
+      tabIndex={0}
+      onClick={() => inputRef.current?.click()}
+      style={{
+        border: "1px dashed " + (dragOver ? "var(--accent)" : "var(--border)"),
+        borderRadius: 8, padding: 10, textAlign: "center", cursor: "pointer",
+        background: dragOver ? "rgba(99,102,241,0.06)" : "transparent",
+        marginBottom: 10, transition: "all 0.2s", fontSize: 12, color: "var(--text2)",
+      }}
+    >
+      <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }}
+        data-testid={"input-first-frame-" + scene.index}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+      \\u{1F5BC} Set first frame override (click, drop, or paste)
+    </div>
+  );
 }
 
 const statusColors: Record<string, { bg: string; text: string; dot: string }> = {
@@ -1048,7 +1349,7 @@ export default function ProjectPage() {
                     </div>
                     <Badge status={scene.status} />
                   </div>
-                  {scene.keyframeUrl && (
+                  {scene.keyframeUrl && !scene.firstFrameUrl && (
                     <div data-testid={"keyframe-scene-" + scene.index} style={{ marginBottom: 12, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", position: "relative" }}>
                       <img src={scene.keyframeUrl} alt={"Keyframe for scene " + (scene.index + 1)} style={{ width: "100%", height: "auto", maxHeight: 200, objectFit: "cover", display: "block" }} />
                       <div style={{ position: "absolute", top: 8, left: 8, background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
@@ -1056,6 +1357,7 @@ export default function ProjectPage() {
                       </div>
                     </div>
                   )}
+                  <FirstFrameDropZone projectId={id} scene={scene} onUpdate={load} />
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8, fontSize: 13, color: "var(--text2)", marginBottom: events.length > 0 ? 12 : 0 }}>
                     <div><span style={{ color: "var(--text)", fontWeight: 500 }}>Env:</span> {scene.environment}</div>
                     <div><span style={{ color: "var(--text)", fontWeight: 500 }}>Camera:</span> {scene.cameraCue}</div>
@@ -1567,7 +1869,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     where: { id },
     select: {
       id: true, status: true, outputUrl: true, totalScenes: true,
-      scenes: { select: { id: true, index: true, status: true, clipUrl: true, keyframeUrl: true, error: true } },
+      scenes: { select: { id: true, index: true, status: true, clipUrl: true, keyframeUrl: true, firstFrameUrl: true, error: true } },
       pipelineJobs: { select: { id: true, stage: true, status: true, progress: true, error: true }, orderBy: { createdAt: "desc" } },
     },
   });
@@ -1657,6 +1959,200 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     message: "Retrying " + failedScenes.length + " failed scene(s)",
     retrying: failedScenes.map(s => s.index),
   });
+}
+`,
+    },
+    {
+      path: "app/api/uploads/image/route.ts",
+      content: `import { NextRequest, NextResponse } from "next/server";
+import * as fs from "fs";
+import * as path from "path";
+import * as crypto from "crypto";
+export const dynamic = "force-dynamic";
+
+const UPLOAD_DIR = process.env.UPLOAD_DIR || "/data/uploads";
+const MAX_SIZE = 10 * 1024 * 1024;
+const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+export async function POST(req: NextRequest) {
+  try {
+    const formData = await req.formData();
+    const file = formData.get("file") as File | null;
+    if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
+
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      return NextResponse.json({ error: "Invalid file type. Allowed: png, jpg, webp" }, { status: 400 });
+    }
+    if (file.size > MAX_SIZE) {
+      return NextResponse.json({ error: "File too large. Max 10MB" }, { status: 400 });
+    }
+
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    const ext = file.type === "image/png" ? ".png" : file.type === "image/webp" ? ".webp" : ".jpg";
+    const filename = crypto.randomUUID() + ext;
+    const filePath = path.join(UPLOAD_DIR, filename);
+    const buffer = Buffer.from(await file.arrayBuffer());
+    fs.writeFileSync(filePath, buffer);
+
+    const url = "/api/uploads/" + filename;
+    return NextResponse.json({ url, filename, mime: file.type, size: file.size }, { status: 201 });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+`,
+    },
+    {
+      path: "app/api/uploads/[filename]/route.ts",
+      content: `import { NextRequest, NextResponse } from "next/server";
+import * as fs from "fs";
+import * as path from "path";
+export const dynamic = "force-dynamic";
+
+const UPLOAD_DIR = process.env.UPLOAD_DIR || "/data/uploads";
+
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ filename: string }> }) {
+  const { filename } = await params;
+  const safeName = path.basename(filename);
+  const filePath = path.join(UPLOAD_DIR, safeName);
+  if (!fs.existsSync(filePath)) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  const buffer = fs.readFileSync(filePath);
+  const ext = path.extname(safeName).toLowerCase();
+  const mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
+  return new NextResponse(buffer, {
+    headers: { "Content-Type": mime, "Cache-Control": "public, max-age=31536000, immutable" },
+  });
+}
+`,
+    },
+    {
+      path: "app/api/projects/[id]/characters/route.ts",
+      content: `import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+export const dynamic = "force-dynamic";
+
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const characters = await prisma.characterRef.findMany({
+    where: { projectId: id },
+    include: { images: true },
+    orderBy: { createdAt: "asc" },
+  });
+  return NextResponse.json(characters);
+}
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const project = await prisma.project.findUnique({ where: { id } });
+  if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+
+  const body = await req.json();
+  const { name, gender, ageGroup } = body;
+  if (!name) return NextResponse.json({ error: "name is required" }, { status: 400 });
+
+  const character = await prisma.characterRef.create({
+    data: {
+      projectId: id,
+      name,
+      gender: gender || "unspecified",
+      ageGroup: ageGroup || "adult",
+      imageData: "",
+    },
+    include: { images: true },
+  });
+  return NextResponse.json(character, { status: 201 });
+}
+`,
+    },
+    {
+      path: "app/api/projects/[id]/characters/[charId]/route.ts",
+      content: `import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+export const dynamic = "force-dynamic";
+
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string; charId: string }> }) {
+  const { charId } = await params;
+  try {
+    await prisma.characterRef.delete({ where: { id: charId } });
+    return NextResponse.json({ ok: true });
+  } catch {
+    return NextResponse.json({ error: "Character not found" }, { status: 404 });
+  }
+}
+`,
+    },
+    {
+      path: "app/api/projects/[id]/characters/[charId]/image/route.ts",
+      content: `import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+export const dynamic = "force-dynamic";
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string; charId: string }> }) {
+  const { charId } = await params;
+  const character = await prisma.characterRef.findUnique({ where: { id: charId } });
+  if (!character) return NextResponse.json({ error: "Character not found" }, { status: 404 });
+
+  const body = await req.json();
+  const { imageUrl, role, mime, size } = body;
+  if (!imageUrl) return NextResponse.json({ error: "imageUrl is required" }, { status: 400 });
+
+  const image = await prisma.characterImage.create({
+    data: {
+      characterId: charId,
+      imageUrl,
+      role: role || "face",
+      mime: mime || "image/jpeg",
+      size: size || 0,
+    },
+  });
+  return NextResponse.json(image, { status: 201 });
+}
+
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string; charId: string }> }) {
+  const { charId } = await params;
+  const url = new URL(req.url);
+  const imageId = url.searchParams.get("imageId");
+  if (imageId) {
+    await prisma.characterImage.delete({ where: { id: imageId } }).catch(() => {});
+  } else {
+    await prisma.characterImage.deleteMany({ where: { characterId: charId } });
+  }
+  return NextResponse.json({ ok: true });
+}
+`,
+    },
+    {
+      path: "app/api/projects/[id]/scenes/[sceneId]/first-frame/route.ts",
+      content: `import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+export const dynamic = "force-dynamic";
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string; sceneId: string }> }) {
+  const { sceneId } = await params;
+  const scene = await prisma.scene.findUnique({ where: { id: sceneId } });
+  if (!scene) return NextResponse.json({ error: "Scene not found" }, { status: 404 });
+
+  const body = await req.json();
+  const { imageUrl, mime, size } = body;
+  if (!imageUrl) return NextResponse.json({ error: "imageUrl is required" }, { status: 400 });
+
+  await prisma.sceneFirstFrame.upsert({
+    where: { sceneId },
+    create: { sceneId, imageUrl, mime: mime || "image/jpeg", size: size || 0 },
+    update: { imageUrl, mime: mime || "image/jpeg", size: size || 0 },
+  });
+  await prisma.scene.update({ where: { id: sceneId }, data: { firstFrameUrl: imageUrl } });
+
+  return NextResponse.json({ ok: true, imageUrl }, { status: 201 });
+}
+
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string; sceneId: string }> }) {
+  const { sceneId } = await params;
+  await prisma.sceneFirstFrame.deleteMany({ where: { sceneId } });
+  await prisma.scene.update({ where: { id: sceneId }, data: { firstFrameUrl: null } });
+  return NextResponse.json({ ok: true });
 }
 `,
     },
@@ -1983,21 +2479,34 @@ export async function generateVideoClip(
   mood: string,
   cameraCue: string,
   durationHint: number,
-  referenceImageUrl?: string
+  referenceImageUrl?: string,
+  firstFrameOverrideUrl?: string,
+  characterRefs?: { name: string; gender: string; ageGroup: string }[]
 ): Promise<VideoGenResult> {
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) throw new Error("REPLICATE_API_TOKEN not configured");
 
-  const keyframeUrl = await generateKeyframeImage(sceneDescription, environment, mood, referenceImageUrl);
+  let keyframeUrl: string;
+  if (firstFrameOverrideUrl) {
+    console.log("[VIDEO] Using first-frame override, skipping keyframe generation: " + firstFrameOverrideUrl.slice(0, 100));
+    keyframeUrl = firstFrameOverrideUrl;
+  } else {
+    keyframeUrl = await generateKeyframeImage(sceneDescription, environment, mood, referenceImageUrl);
+  }
 
-  const prompt = [
+  const promptParts = [
     STYLE + " footage.",
     "Scene: " + sceneDescription,
     "Environment: " + environment,
     "Mood/Lighting: " + mood,
     "Camera: " + cameraCue,
-    "Style: realistic, cinematic, NOT cartoon, NOT anime, NOT stylized.",
-  ].join(" ");
+  ];
+  if (characterRefs && characterRefs.length > 0) {
+    const charDesc = characterRefs.map(c => c.name + " (" + c.gender + ", " + c.ageGroup + ")").join(", ");
+    promptParts.push("Characters: " + charDesc + ".");
+  }
+  promptParts.push("Style: realistic, cinematic, NOT cartoon, NOT anime, NOT stylized.");
+  const prompt = promptParts.join(" ");
 
   console.log("[VIDEO] Generating clip with model=" + MODEL + " keyframe=" + keyframeUrl.slice(0, 80) + " prompt=" + prompt.slice(0, 100) + "...");
 
@@ -2389,8 +2898,14 @@ export async function runPipeline(projectId: string): Promise<void> {
             : scene.cameraCue;
 
           if (isVideoProviderConfigured()) {
+            const charRefs = await prisma.characterRef.findMany({
+              where: { projectId },
+              select: { name: true, gender: true, ageGroup: true },
+            });
             const result = await generateVideoClip(
-              scene.description, scene.environment, scene.mood, cameraHint, scene.duration
+              scene.description, scene.environment, scene.mood, cameraHint, scene.duration,
+              undefined, scene.firstFrameUrl || undefined,
+              charRefs.length > 0 ? charRefs : undefined
             );
             clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
             await downloadFile(result.url, clipPath);
@@ -2409,7 +2924,7 @@ export async function runPipeline(projectId: string): Promise<void> {
             if (result.keyframeUrl) {
               await prisma.scene.update({ where: { id: scene.id }, data: { keyframeUrl: result.keyframeUrl } });
             }
-            await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " clip generated from Replicate (keyframe=" + (result.keyframeUrl ? "yes" : "no") + ", events: " + events.length + ")");
+            await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " clip generated from Replicate (keyframe=" + (result.keyframeUrl ? "yes" : "no") + ", firstFrame=" + (scene.firstFrameUrl ? "override" : "generated") + ", events: " + events.length + ")");
           } else {
             clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
             const demoColors = ["0x1e40af", "0x0e7490", "0x7e22ce", "0xb45309", "0x15803d", "0xbe185d", "0x0369a1", "0x4338ca"];
@@ -2645,7 +3160,15 @@ export async function runPipelineRetry(projectId: string, failedSceneIds: string
         const cameraHint = cameraEvents.length > 0 ? cameraEvents.map(e => e.content).join(", ") : scene.cameraCue;
 
         if (isVideoProviderConfigured()) {
-          const result = await generateVideoClip(scene.description, scene.environment, scene.mood, cameraHint, scene.duration);
+          const charRefs = await prisma.characterRef.findMany({
+            where: { projectId },
+            select: { name: true, gender: true, ageGroup: true },
+          });
+          const result = await generateVideoClip(
+            scene.description, scene.environment, scene.mood, cameraHint, scene.duration,
+            undefined, scene.firstFrameUrl || undefined,
+            charRefs.length > 0 ? charRefs : undefined
+          );
           clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
           await downloadFile(result.url, clipPath);
 
@@ -2662,7 +3185,7 @@ export async function runPipelineRetry(projectId: string, failedSceneIds: string
           if (result.keyframeUrl) {
             await prisma.scene.update({ where: { id: scene.id }, data: { keyframeUrl: result.keyframeUrl } });
           }
-          await pipeLog(projectId, retryJob.id, "retry_failed", "Scene " + scene.index + " retried successfully from Replicate (keyframe=" + (result.keyframeUrl ? "yes" : "no") + ")");
+          await pipeLog(projectId, retryJob.id, "retry_failed", "Scene " + scene.index + " retried successfully from Replicate (keyframe=" + (result.keyframeUrl ? "yes" : "no") + ", firstFrame=" + (scene.firstFrameUrl ? "override" : "generated") + ")");
         } else {
           clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
           const bgColor = "0x1e40af";
@@ -2806,7 +3329,7 @@ export const aiVideoGeneratorSaasTemplate: TemplateDefinition = {
     "/api/projects/[id]/status",
     "/api/projects/[id]/download",
   ],
-  requiredEntities: ["User", "Project", "Scene", "AudioTrack", "CharacterRef", "PipelineJob", "PipelineLog"],
+  requiredEntities: ["User", "Project", "Scene", "AudioTrack", "CharacterRef", "CharacterImage", "SceneFirstFrame", "PipelineJob", "PipelineLog"],
   getFiles,
   getPackageJson,
 };
