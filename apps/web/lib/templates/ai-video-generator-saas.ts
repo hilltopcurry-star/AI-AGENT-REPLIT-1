@@ -51,11 +51,12 @@ model Scene {
   mood          String
   duration      Float    @default(5.0)
   timelineJson  String   @default("[]")
-  clipUrl       String?
-  keyframeUrl   String?
-  firstFrameUrl String?
-  status        String   @default("pending")
-  error         String?
+  clipUrl          String?
+  keyframeUrl      String?
+  firstFrameUrl    String?
+  identityDebugJson String?
+  status           String   @default("pending")
+  error            String?
   createdAt     DateTime @default(now())
   audioTracks   AudioTrack[]
   firstFrame    SceneFirstFrame?
@@ -1015,7 +1016,7 @@ interface TimelineEventUI {
 interface Scene {
   id: string; index: number; description: string; environment: string;
   characters: string; actions: string; cameraCue: string; mood: string;
-  duration: number; timelineJson: string; clipUrl: string | null; keyframeUrl: string | null; firstFrameUrl: string | null; status: string; error: string | null;
+  duration: number; timelineJson: string; clipUrl: string | null; keyframeUrl: string | null; firstFrameUrl: string | null; identityDebugJson: string | null; status: string; error: string | null;
 }
 interface ProjectData {
   id: string; title: string; script: string; status: string;
@@ -1135,6 +1136,7 @@ export default function ProjectPage() {
   const [actionLoading, setActionLoading] = useState("");
   const [setupError, setSetupError] = useState("");
   const [showScript, setShowScript] = useState(false);
+  const [previewingScene, setPreviewingScene] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/projects/" + id);
@@ -1428,22 +1430,82 @@ export default function ProjectPage() {
                     </div>
                     <Badge status={scene.status} />
                   </div>
-                  {scene.keyframeUrl && !scene.firstFrameUrl && (
-                    <div data-testid={"keyframe-scene-" + scene.index} style={{ marginBottom: 12, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", position: "relative" }}>
-                      <img src={scene.keyframeUrl} alt={"Keyframe for scene " + (scene.index + 1)} style={{ width: "100%", height: "auto", maxHeight: 200, objectFit: "cover", display: "block" }} />
-                      <div style={{ position: "absolute", top: 8, left: 8, display: "flex", gap: 4 }}>
-                        <span style={{ background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
-                          KEYFRAME
-                        </span>
-                        {project.strictIdentity && project.characterRefs && project.characterRefs.some((c: any) => c.images && c.images.length > 0) && (
-                          <span data-testid={"badge-identity-scene-" + scene.index} style={{ background: "rgba(99,102,241,0.8)", color: "#fff", fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
-                            InstantID
-                          </span>
+                  {(() => {
+                    let idDebug: any = null;
+                    try { if (scene.identityDebugJson) idDebug = JSON.parse(scene.identityDebugJson); } catch {}
+                    return (
+                      <>
+                        <div data-testid={"badge-identity-status-" + scene.index} style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          {project.strictIdentity && project.characterRefs && project.characterRefs.some((c: any) => c.images && c.images.length > 0) ? (
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: idDebug?.keyframeSource === "identity-model" ? "rgba(34,197,94,0.15)" : "rgba(245,158,11,0.15)", color: idDebug?.keyframeSource === "identity-model" ? "#16a34a" : "#d97706", border: "1px solid " + (idDebug?.keyframeSource === "identity-model" ? "rgba(34,197,94,0.3)" : "rgba(245,158,11,0.3)") }}>
+                              {idDebug?.keyframeSource === "identity-model" ? "Identity: ON (refs used)" : scene.firstFrameUrl ? "Identity: OFF (manual override)" : scene.keyframeUrl ? "Identity: ON (refs used)" : "Identity: PENDING"}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: "rgba(100,116,139,0.1)", color: "#64748b", border: "1px solid rgba(100,116,139,0.2)" }}>
+                              Identity: OFF
+                            </span>
+                          )}
+                          {idDebug?.identityMethod && (
+                            <span style={{ fontSize: 10, color: "var(--text2)" }}>
+                              Model: {idDebug.identityMethod}
+                            </span>
+                          )}
+                          {idDebug?.identityCharacter && (
+                            <span style={{ fontSize: 10, color: "var(--text2)" }}>
+                              Char: {idDebug.identityCharacter}
+                            </span>
+                          )}
+                          {idDebug?.identityFaceImageUsed && (
+                            <span title={idDebug.identityFaceImageUsed} style={{ fontSize: 10, color: "var(--accent2)", cursor: "help" }}>
+                              Ref: &#10003;
+                            </span>
+                          )}
+                        </div>
+                        {scene.keyframeUrl && !scene.firstFrameUrl && (
+                          <div data-testid={"keyframe-scene-" + scene.index} style={{ marginBottom: 12, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", position: "relative" }}>
+                            <img src={scene.keyframeUrl} alt={"Keyframe for scene " + (scene.index + 1)} style={{ width: "100%", height: "auto", maxHeight: 200, objectFit: "cover", display: "block" }} />
+                            <div style={{ position: "absolute", top: 8, left: 8, display: "flex", gap: 4 }}>
+                              <span style={{ background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
+                                KEYFRAME
+                              </span>
+                              {idDebug?.keyframeSource === "identity-model" && (
+                                <span style={{ background: "rgba(99,102,241,0.8)", color: "#fff", fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
+                                  InstantID
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         )}
-                      </div>
+                      </>
+                    );
+                  })()}
+                  <FirstFrameDropZone projectId={id} scene={scene} onUpdate={load} />
+                  {project.status === "parsed" && !scene.clipUrl && (
+                    <div style={{ marginBottom: 10 }}>
+                      <button data-testid={"button-preview-keyframe-" + scene.index}
+                        disabled={previewingScene === scene.id}
+                        onClick={async () => {
+                          setPreviewingScene(scene.id);
+                          try {
+                            const res = await fetch("/api/projects/" + id + "/scenes/" + scene.id + "/preview-keyframe", { method: "POST" });
+                            const data = await res.json();
+                            if (!res.ok) { alert("Preview failed: " + (data.error || "Unknown error")); }
+                            else { load(); }
+                          } catch (err: any) { alert("Preview error: " + err.message); }
+                          setPreviewingScene(null);
+                        }}
+                        style={{ fontSize: 12, padding: "6px 14px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", color: "var(--text)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        {previewingScene === scene.id ? (
+                          <><span style={{ display: "inline-block", width: 12, height: 12, border: "2px solid var(--accent2)", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.6s linear infinite" }} /> Generating...</>
+                        ) : (
+                          <>&#128444;&#65039; Preview Keyframe</>
+                        )}
+                      </button>
+                      <span style={{ fontSize: 11, color: "var(--text2)", marginLeft: 8 }}>
+                        Generate keyframe {project.strictIdentity ? "with identity matching" : "with Flux"} to verify before full video
+                      </span>
                     </div>
                   )}
-                  <FirstFrameDropZone projectId={id} scene={scene} onUpdate={load} />
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8, fontSize: 13, color: "var(--text2)", marginBottom: events.length > 0 ? 12 : 0 }}>
                     <div><span style={{ color: "var(--text)", fontWeight: 500 }}>Env:</span> {scene.environment}</div>
                     <div><span style={{ color: "var(--text)", fontWeight: 500 }}>Camera:</span> {scene.cameraCue}</div>
@@ -2243,6 +2305,54 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 `,
     },
     {
+      path: "app/api/projects/[id]/scenes/[sceneId]/preview-keyframe/route.ts",
+      content: `import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { generateKeyframeImage, generateIdentityKeyframe, matchCharactersToScene, type CharacterFaceRef } from "@/lib/video-provider";
+export const dynamic = "force-dynamic";
+
+export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string; sceneId: string }> }) {
+  const { id, sceneId } = await params;
+  const project = await prisma.project.findUnique({ where: { id }, include: { characterRefs: { include: { images: true } } } });
+  if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  const scene = await prisma.scene.findUnique({ where: { id: sceneId } });
+  if (!scene) return NextResponse.json({ error: "Scene not found" }, { status: 404 });
+
+  try {
+    const allRefs: CharacterFaceRef[] = project.characterRefs.map((c: any) => ({
+      name: c.name, gender: c.gender, ageGroup: c.ageGroup,
+      faceImageUrl: c.images && c.images.length > 0 ? c.images[0].imageUrl : undefined,
+    }));
+    const sceneRefs = matchCharactersToScene(scene.characters, allRefs);
+    let keyframeUrl: string;
+    let debugJson: any = { keyframeSource: "flux" };
+
+    if (project.strictIdentity && sceneRefs.length > 0) {
+      const faceChar = sceneRefs.find(c => c.faceImageUrl);
+      if (faceChar && faceChar.faceImageUrl) {
+        const result = await generateIdentityKeyframe(scene.description, scene.environment, scene.mood, faceChar.faceImageUrl, faceChar.name);
+        keyframeUrl = result.url;
+        debugJson = { keyframeSource: "identity-model", identityMethod: result.method, identityCharacter: result.characterName, identityFaceImageUsed: result.faceImageUsed };
+      } else {
+        const refsWithImages = allRefs.filter(c => c.faceImageUrl);
+        if (refsWithImages.length > 0) {
+          return NextResponse.json({ error: "Identity pipeline not applied: strict identity is enabled but no face images matched characters in this scene (" + scene.characters.slice(0, 80) + ")" }, { status: 400 });
+        }
+        keyframeUrl = await generateKeyframeImage(scene.description, scene.environment, scene.mood);
+      }
+    } else {
+      keyframeUrl = await generateKeyframeImage(scene.description, scene.environment, scene.mood);
+    }
+
+    await prisma.scene.update({ where: { id: sceneId }, data: { keyframeUrl, identityDebugJson: JSON.stringify(debugJson) } });
+    return NextResponse.json({ ok: true, keyframeUrl, debug: debugJson });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+`,
+    },
+    {
       path: "lib/script-parser.ts",
       content: `import type { SceneSpec, TimelineEvent } from "./scene-contract";
 import { validateTimelineEvents, computeSceneDuration } from "./scene-contract";
@@ -2602,7 +2712,7 @@ export async function generateIdentityKeyframe(
     controlnet_conditioning_scale: 0.8,
     num_inference_steps: 30,
     guidance_scale: 5,
-    seed: 0,
+    seed: Math.floor(Math.random() * 2147483647),
     scheduler: "EulerDiscreteScheduler",
   };
 
@@ -2645,6 +2755,16 @@ export interface VideoGenResultExtended extends VideoGenResult {
   debug: VideoGenDebug;
 }
 
+export function matchCharactersToScene(
+  sceneCharactersText: string,
+  allRefs: CharacterFaceRef[]
+): CharacterFaceRef[] {
+  if (!sceneCharactersText || allRefs.length === 0) return allRefs;
+  const sceneText = sceneCharactersText.toLowerCase();
+  const matched = allRefs.filter(c => sceneText.includes(c.name.toLowerCase()));
+  return matched.length > 0 ? matched : allRefs;
+}
+
 export async function generateVideoClip(
   sceneDescription: string,
   environment: string,
@@ -2654,10 +2774,15 @@ export async function generateVideoClip(
   referenceImageUrl?: string,
   firstFrameOverrideUrl?: string,
   characterRefs?: CharacterFaceRef[],
-  strictIdentity?: boolean
+  strictIdentity?: boolean,
+  sceneCharactersText?: string
 ): Promise<VideoGenResultExtended> {
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) throw new Error("REPLICATE_API_TOKEN not configured");
+
+  const sceneRefs = characterRefs && sceneCharactersText
+    ? matchCharactersToScene(sceneCharactersText, characterRefs)
+    : characterRefs;
 
   let keyframeUrl: string;
   const debug: VideoGenDebug = { keyframeSource: "flux" };
@@ -2666,8 +2791,8 @@ export async function generateVideoClip(
     console.log("[VIDEO] Using first-frame override, skipping keyframe generation: " + firstFrameOverrideUrl.slice(0, 100));
     keyframeUrl = firstFrameOverrideUrl;
     debug.keyframeSource = "first-frame-override";
-  } else if (strictIdentity && characterRefs && characterRefs.length > 0) {
-    const faceChar = characterRefs.find(c => c.faceImageUrl);
+  } else if (strictIdentity && sceneRefs && sceneRefs.length > 0) {
+    const faceChar = sceneRefs.find(c => c.faceImageUrl);
     if (faceChar && faceChar.faceImageUrl) {
       console.log("[VIDEO] Strict identity mode: using InstantID for character=" + faceChar.name + " face=" + faceChar.faceImageUrl.slice(0, 80));
       const identityResult = await generateIdentityKeyframe(
@@ -2679,7 +2804,16 @@ export async function generateVideoClip(
       debug.identityCharacter = identityResult.characterName;
       debug.identityFaceImageUsed = identityResult.faceImageUsed;
     } else {
-      console.log("[VIDEO] Strict identity enabled but no face images found, falling back to Flux");
+      const refsWithImages = (characterRefs || []).filter(c => c.faceImageUrl);
+      if (refsWithImages.length > 0) {
+        throw new Error(
+          "Identity pipeline not applied: strict identity is enabled and character references with face images exist (" +
+          refsWithImages.map(c => c.name).join(", ") +
+          "), but none of the characters matched this scene ('" + (sceneCharactersText || "").slice(0, 80) +
+          "'). Either add the character names to the scene or upload face images for the characters in this scene."
+        );
+      }
+      console.log("[VIDEO] Strict identity enabled but no face images found on any character, falling back to Flux");
       keyframeUrl = await generateKeyframeImage(sceneDescription, environment, mood, referenceImageUrl);
     }
   } else {
@@ -3104,7 +3238,8 @@ export async function runPipeline(projectId: string): Promise<void> {
               scene.description, scene.environment, scene.mood, cameraHint, scene.duration,
               undefined, scene.firstFrameUrl || undefined,
               faceRefs.length > 0 ? faceRefs : undefined,
-              project.strictIdentity
+              project.strictIdentity,
+              scene.characters
             );
             clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
             await downloadFile(result.url, clipPath);
@@ -3120,10 +3255,13 @@ export async function runPipeline(projectId: string): Promise<void> {
               throw new Error("Generated clip failed ffprobe validation: " + (probeErr.message || "unknown").slice(0, 200));
             }
 
-            if (result.keyframeUrl) {
-              await prisma.scene.update({ where: { id: scene.id }, data: { keyframeUrl: result.keyframeUrl } });
+            const sceneUpdateData: any = {};
+            if (result.keyframeUrl) sceneUpdateData.keyframeUrl = result.keyframeUrl;
+            if (result.debug) sceneUpdateData.identityDebugJson = JSON.stringify(result.debug);
+            if (Object.keys(sceneUpdateData).length > 0) {
+              await prisma.scene.update({ where: { id: scene.id }, data: sceneUpdateData });
             }
-            const debugStr = result.debug ? " identity=" + (result.debug.identityMethod || "none") + " keyframeSrc=" + result.debug.keyframeSource + (result.debug.identityCharacter ? " char=" + result.debug.identityCharacter : "") : "";
+            const debugStr = result.debug ? " identity=" + (result.debug.identityMethod || "none") + " keyframeSrc=" + result.debug.keyframeSource + (result.debug.identityCharacter ? " char=" + result.debug.identityCharacter : "") + (result.debug.identityFaceImageUsed ? " faceRef=" + result.debug.identityFaceImageUsed.slice(0, 60) : "") : "";
             await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " clip generated from Replicate (keyframe=" + (result.keyframeUrl ? "yes" : "no") + ", firstFrame=" + (scene.firstFrameUrl ? "override" : "generated") + ", events: " + events.length + debugStr + ")");
           } else {
             clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
@@ -3375,7 +3513,8 @@ export async function runPipelineRetry(projectId: string, failedSceneIds: string
             scene.description, scene.environment, scene.mood, cameraHint, scene.duration,
             undefined, scene.firstFrameUrl || undefined,
             faceRefs.length > 0 ? faceRefs : undefined,
-            retryProject?.strictIdentity
+            retryProject?.strictIdentity,
+            scene.characters
           );
           clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
           await downloadFile(result.url, clipPath);
@@ -3390,10 +3529,13 @@ export async function runPipelineRetry(projectId: string, failedSceneIds: string
             throw new Error("Retried clip failed ffprobe validation: " + (probeErr.message || "unknown").slice(0, 200));
           }
 
-          if (result.keyframeUrl) {
-            await prisma.scene.update({ where: { id: scene.id }, data: { keyframeUrl: result.keyframeUrl } });
+          const retryUpdateData: any = {};
+          if (result.keyframeUrl) retryUpdateData.keyframeUrl = result.keyframeUrl;
+          if (result.debug) retryUpdateData.identityDebugJson = JSON.stringify(result.debug);
+          if (Object.keys(retryUpdateData).length > 0) {
+            await prisma.scene.update({ where: { id: scene.id }, data: retryUpdateData });
           }
-          const debugStr = result.debug ? " identity=" + (result.debug.identityMethod || "none") + " keyframeSrc=" + result.debug.keyframeSource : "";
+          const debugStr = result.debug ? " identity=" + (result.debug.identityMethod || "none") + " keyframeSrc=" + result.debug.keyframeSource + (result.debug.identityFaceImageUsed ? " faceRef=" + result.debug.identityFaceImageUsed.slice(0, 60) : "") : "";
           await pipeLog(projectId, retryJob.id, "retry_failed", "Scene " + scene.index + " retried successfully from Replicate (keyframe=" + (result.keyframeUrl ? "yes" : "no") + ", firstFrame=" + (scene.firstFrameUrl ? "override" : "generated") + debugStr + ")");
         } else {
           clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
