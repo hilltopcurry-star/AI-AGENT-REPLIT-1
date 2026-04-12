@@ -51,6 +51,7 @@ model Scene {
   duration      Float    @default(5.0)
   timelineJson  String   @default("[]")
   clipUrl       String?
+  keyframeUrl   String?
   status        String   @default("pending")
   error         String?
   createdAt     DateTime @default(now())
@@ -549,6 +550,7 @@ interface AIStatus {
   hasInvalidTokens: boolean;
   hasBillingIssues: boolean;
   videoModel: string;
+  imageModel: string;
   videoStyle: string;
   services: ServiceInfo[];
   missing: { name: string; envVar: string; helpUrl: string; error?: string }[];
@@ -718,7 +720,8 @@ export default function SetupPage() {
           <div className="glass-card" style={{ padding: 20, marginBottom: 24 }}>
             <h3 style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Video Configuration</h3>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, fontSize: 13 }}>
-              <div><span style={{ color: "var(--text2)" }}>Model:</span> <span style={{ fontWeight: 500 }}>{status.videoModel}</span></div>
+              <div><span style={{ color: "var(--text2)" }}>Video Model:</span> <span style={{ fontWeight: 500 }}>{status.videoModel}</span></div>
+              <div><span style={{ color: "var(--text2)" }}>Keyframe Model:</span> <span style={{ fontWeight: 500 }}>{status.imageModel}</span></div>
               <div><span style={{ color: "var(--text2)" }}>Style:</span> <span style={{ fontWeight: 500 }}>{status.videoStyle}</span></div>
               <div><span style={{ color: "var(--text2)" }}>Deploy target:</span> <span style={{ fontWeight: 500 }}>{status.deployTarget}</span></div>
               <div><span style={{ color: "var(--text2)" }}>Demo mode:</span> <span style={{ fontWeight: 500 }}>{status.demoMode ? "ON" : "OFF"}</span></div>
@@ -753,7 +756,7 @@ interface TimelineEventUI {
 interface Scene {
   id: string; index: number; description: string; environment: string;
   characters: string; actions: string; cameraCue: string; mood: string;
-  duration: number; timelineJson: string; clipUrl: string | null; status: string; error: string | null;
+  duration: number; timelineJson: string; clipUrl: string | null; keyframeUrl: string | null; status: string; error: string | null;
 }
 interface ProjectData {
   id: string; title: string; script: string; status: string;
@@ -1045,6 +1048,14 @@ export default function ProjectPage() {
                     </div>
                     <Badge status={scene.status} />
                   </div>
+                  {scene.keyframeUrl && (
+                    <div data-testid={"keyframe-scene-" + scene.index} style={{ marginBottom: 12, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", position: "relative" }}>
+                      <img src={scene.keyframeUrl} alt={"Keyframe for scene " + (scene.index + 1)} style={{ width: "100%", height: "auto", maxHeight: 200, objectFit: "cover", display: "block" }} />
+                      <div style={{ position: "absolute", top: 8, left: 8, background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
+                        KEYFRAME
+                      </div>
+                    </div>
+                  )}
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8, fontSize: 13, color: "var(--text2)", marginBottom: events.length > 0 ? 12 : 0 }}>
                     <div><span style={{ color: "var(--text)", fontWeight: 500 }}>Env:</span> {scene.environment}</div>
                     <div><span style={{ color: "var(--text)", fontWeight: 500 }}>Camera:</span> {scene.cameraCue}</div>
@@ -1282,6 +1293,7 @@ export async function GET() {
   const openaiKey = process.env.OPENAI_API_KEY;
   const replicateToken = process.env.REPLICATE_API_TOKEN;
   const videoModel = process.env.VIDEO_MODEL || "minimax/video-01-live";
+  const imageModel = process.env.IMAGE_MODEL || "black-forest-labs/flux-1.1-pro";
   const videoStyle = process.env.VIDEO_STYLE || "photorealistic cinematic";
   const isDemoMode = process.env.DEMO_MODE === "true";
 
@@ -1337,7 +1349,7 @@ export async function GET() {
       provider: replicateToken ? "replicate" : "none",
       envVar: "REPLICATE_API_TOKEN",
       helpUrl: "https://replicate.com/account/api-tokens",
-      description: "Generates video clips from scene descriptions using " + videoModel,
+      description: "Generates keyframe images (" + imageModel + ") then video clips (" + videoModel + ") from scene descriptions",
       error: replicateCheck?.billingStatus === "billing_required"
         ? "Insufficient credits. Add a payment method at https://replicate.com/account/billing"
         : replicateCheck?.billingStatus === "rate_limited"
@@ -1372,6 +1384,7 @@ export async function GET() {
     videoProvider: services[1].status,
     videoProviderName: services[1].provider,
     videoModel,
+    imageModel,
     videoStyle,
     tts: services[2].status,
     realisticMode: true,
@@ -1554,7 +1567,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     where: { id },
     select: {
       id: true, status: true, outputUrl: true, totalScenes: true,
-      scenes: { select: { id: true, index: true, status: true, clipUrl: true, error: true } },
+      scenes: { select: { id: true, index: true, status: true, clipUrl: true, keyframeUrl: true, error: true } },
       pipelineJobs: { select: { id: true, stage: true, status: true, progress: true, error: true }, orderBy: { createdAt: "desc" } },
     },
   });
@@ -1788,10 +1801,12 @@ function fallbackParse(script: string): ParsedScene[] {
       path: "lib/video-provider.ts",
       content: `const STYLE = process.env.VIDEO_STYLE || "photorealistic cinematic";
 const MODEL = process.env.VIDEO_MODEL || "minimax/video-01-live";
+const IMAGE_MODEL = process.env.IMAGE_MODEL || "black-forest-labs/flux-1.1-pro";
 
 export interface VideoGenResult {
   url: string;
   durationSec: number;
+  keyframeUrl?: string;
 }
 
 export function isVideoProviderConfigured(): boolean {
@@ -1903,15 +1918,71 @@ async function replicateRunInner(model: string, input: Record<string, any>, toke
   throw new Error("Replicate prediction timed out after " + maxWait + " polls");
 }
 
+export async function generateKeyframeImage(
+  sceneDescription: string,
+  environment: string,
+  mood: string,
+  referenceImageUrl?: string
+): Promise<string> {
+  const token = process.env.REPLICATE_API_TOKEN;
+  if (!token) throw new Error("REPLICATE_API_TOKEN not configured");
+
+  const imagePrompt = [
+    STYLE + " still frame.",
+    "Scene: " + sceneDescription,
+    "Environment: " + environment,
+    "Mood/Lighting: " + mood,
+    "Style: photorealistic, cinematic, high quality, 4K, NOT cartoon, NOT anime, NOT stylized, NOT illustration.",
+    "Single high-resolution keyframe photograph.",
+  ].join(" ");
+
+  console.log("[KEYFRAME] Generating keyframe with model=" + IMAGE_MODEL + " prompt=" + imagePrompt.slice(0, 120) + "...");
+
+  const input: Record<string, any> = {
+    prompt: imagePrompt,
+    aspect_ratio: "16:9",
+    output_format: "jpg",
+    output_quality: 90,
+    safety_tolerance: 2,
+  };
+  if (referenceImageUrl) {
+    input.image = referenceImageUrl;
+    input.prompt_upsampling = false;
+  }
+
+  const output = await replicateRun(IMAGE_MODEL, input, token);
+
+  let url = "";
+  if (typeof output === "string") {
+    url = output;
+  } else if (Array.isArray(output) && output.length > 0) {
+    url = typeof output[0] === "string" ? output[0] : (output[0] as any)?.url || String(output[0]);
+  } else if (output && typeof output === "object" && "url" in (output as any)) {
+    url = (output as any).url;
+  } else {
+    url = String(output);
+  }
+
+  if (!url || !url.startsWith("http")) {
+    throw new Error("Keyframe generation returned invalid URL: " + String(url).slice(0, 200));
+  }
+
+  console.log("[KEYFRAME] Generated keyframe: " + url.slice(0, 100) + "...");
+  return url;
+}
+
 export async function generateVideoClip(
   sceneDescription: string,
   environment: string,
   mood: string,
   cameraCue: string,
-  durationHint: number
+  durationHint: number,
+  referenceImageUrl?: string
 ): Promise<VideoGenResult> {
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) throw new Error("REPLICATE_API_TOKEN not configured");
+
+  const keyframeUrl = await generateKeyframeImage(sceneDescription, environment, mood, referenceImageUrl);
 
   const prompt = [
     STYLE + " footage.",
@@ -1922,11 +1993,11 @@ export async function generateVideoClip(
     "Style: realistic, cinematic, NOT cartoon, NOT anime, NOT stylized.",
   ].join(" ");
 
-  console.log("[VIDEO] Generating clip with model=" + MODEL + " prompt=" + prompt.slice(0, 120) + "...");
+  console.log("[VIDEO] Generating clip with model=" + MODEL + " keyframe=" + keyframeUrl.slice(0, 80) + " prompt=" + prompt.slice(0, 100) + "...");
 
   const output = await replicateRun(MODEL, {
     prompt,
-    num_frames: Math.min(Math.max(Math.round(durationHint * 8), 32), 80),
+    first_frame_image: keyframeUrl,
   }, token);
 
   let url = "";
@@ -1944,7 +2015,7 @@ export async function generateVideoClip(
     throw new Error("Video generation returned invalid URL: " + String(url).slice(0, 200));
   }
 
-  return { url, durationSec: durationHint };
+  return { url, durationSec: durationHint, keyframeUrl };
 }
 
 export function getProviderLimits(): { maxClipSeconds: number; maxTotalMinutes: number; note: string } {
@@ -2317,7 +2388,22 @@ export async function runPipeline(projectId: string): Promise<void> {
             );
             clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
             await downloadFile(result.url, clipPath);
-            await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " clip generated from Replicate (events: " + events.length + ")");
+
+            try {
+              const probeOut = execSync(
+                "ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of csv=p=0 " + JSON.stringify(clipPath),
+                { encoding: "utf-8", timeout: 15000, stdio: "pipe" }
+              ).trim();
+              if (!probeOut) throw new Error("ffprobe returned empty output");
+              await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " clip validated: " + probeOut);
+            } catch (probeErr: any) {
+              throw new Error("Generated clip failed ffprobe validation: " + (probeErr.message || "unknown").slice(0, 200));
+            }
+
+            if (result.keyframeUrl) {
+              await prisma.scene.update({ where: { id: scene.id }, data: { keyframeUrl: result.keyframeUrl } });
+            }
+            await pipeLog(projectId, genJob.id, "generate_clips", "Scene " + scene.index + " clip generated from Replicate (keyframe=" + (result.keyframeUrl ? "yes" : "no") + ", events: " + events.length + ")");
           } else {
             clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
             const demoColors = ["0x1e40af", "0x0e7490", "0x7e22ce", "0xb45309", "0x15803d", "0xbe185d", "0x0369a1", "0x4338ca"];
@@ -2386,6 +2472,18 @@ export async function runPipeline(projectId: string): Promise<void> {
           }
         }
       }));
+    }
+
+    const postGenScenes = await prisma.scene.findMany({ where: { projectId }, orderBy: { index: "asc" } });
+    const failedScenes = postGenScenes.filter(s => s.status === "failed");
+    if (failedScenes.length > 0) {
+      await prisma.pipelineJob.update({
+        where: { id: genJob.id },
+        data: { status: "failed", error: failedScenes.length + " scene(s) failed clip generation", completedAt: new Date() },
+      });
+      await prisma.project.update({ where: { id: projectId }, data: { status: "failed" } });
+      await pipeLog(projectId, genJob.id, "generate_clips", failedScenes.length + " scene(s) failed. Use 'Retry Failed Scenes' after resolving issues.", "ERROR");
+      return;
     }
 
     await prisma.pipelineJob.update({
@@ -2544,7 +2642,21 @@ export async function runPipelineRetry(projectId: string, failedSceneIds: string
           const result = await generateVideoClip(scene.description, scene.environment, scene.mood, cameraHint, scene.duration);
           clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
           await downloadFile(result.url, clipPath);
-          await pipeLog(projectId, retryJob.id, "retry_failed", "Scene " + scene.index + " retried successfully from Replicate");
+
+          try {
+            const probeOut = execSync(
+              "ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height -of csv=p=0 " + JSON.stringify(clipPath),
+              { encoding: "utf-8", timeout: 15000, stdio: "pipe" }
+            ).trim();
+            if (!probeOut) throw new Error("ffprobe returned empty output");
+          } catch (probeErr: any) {
+            throw new Error("Retried clip failed ffprobe validation: " + (probeErr.message || "unknown").slice(0, 200));
+          }
+
+          if (result.keyframeUrl) {
+            await prisma.scene.update({ where: { id: scene.id }, data: { keyframeUrl: result.keyframeUrl } });
+          }
+          await pipeLog(projectId, retryJob.id, "retry_failed", "Scene " + scene.index + " retried successfully from Replicate (keyframe=" + (result.keyframeUrl ? "yes" : "no") + ")");
         } else {
           clipPath = path.join(clipsDir, "scene_" + scene.index + ".mp4");
           const bgColor = "0x1e40af";
