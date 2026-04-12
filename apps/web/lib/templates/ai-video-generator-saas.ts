@@ -1894,13 +1894,19 @@ async function replicateRunInner(model: string, input: Record<string, any>, toke
   }
 
   let prediction = await createRes.json();
-  const maxWait = 300;
-  for (let i = 0; i < maxWait; i++) {
+  const POLL_INTERVAL_MS = 3000;
+  const MAX_POLL_DURATION_MS = 10 * 60 * 1000;
+  const startTime = Date.now();
+  while (Date.now() - startTime < MAX_POLL_DURATION_MS) {
     if (prediction.status === "succeeded") return prediction.output;
     if (prediction.status === "failed" || prediction.status === "canceled") {
       throw new Error("Replicate prediction " + prediction.status + ": " + (prediction.error || "unknown"));
     }
-    await new Promise(r => setTimeout(r, 2000));
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    if (elapsed > 0 && elapsed % 30 === 0) {
+      console.log("[VIDEO] Still waiting for prediction " + prediction.id + " (" + elapsed + "s elapsed, status=" + prediction.status + ")");
+    }
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
     const pollRes = await fetch("https://api.replicate.com/v1/predictions/" + prediction.id, {
       headers: { "Authorization": "Bearer " + token },
     });
@@ -1915,7 +1921,7 @@ async function replicateRunInner(model: string, input: Record<string, any>, toke
     if (!pollRes.ok) throw new Error("Replicate poll error " + pollRes.status);
     prediction = await pollRes.json();
   }
-  throw new Error("Replicate prediction timed out after " + maxWait + " polls");
+  throw new Error("Replicate prediction timed out after " + Math.round(MAX_POLL_DURATION_MS / 1000) + "s (prediction " + prediction.id + ", last status: " + prediction.status + ")");
 }
 
 export async function generateKeyframeImage(
@@ -2214,7 +2220,7 @@ export async function stitchVideo(
 
   console.log("[STITCH] Concatenating " + scenes.length + " clips with H.264 re-encode...");
 
-  const H264_OPTS = "-c:v libx264 -pix_fmt yuv420p -profile:v high -level 4.1 -movflags +faststart";
+  const H264_OPTS = "-c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -profile:v high -level 4.1 -movflags +faststart";
 
   try {
     execSync(
@@ -2225,12 +2231,12 @@ export async function stitchVideo(
     console.log("[STITCH] H.264 concat failed, trying simpler encode:", err.stderr?.slice(0, 300) || err.message?.slice(0, 300));
     try {
       execSync(
-        "ffmpeg -y -f concat -safe 0 -i " + JSON.stringify(concatListPath) + " -c:v libx264 -pix_fmt yuv420p -movflags +faststart " + JSON.stringify(path.join(outputDir, "video_only.mp4")),
+        "ffmpeg -y -f concat -safe 0 -i " + JSON.stringify(concatListPath) + " -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -movflags +faststart " + JSON.stringify(path.join(outputDir, "video_only.mp4")),
         { encoding: "utf-8", timeout: 300000, stdio: "pipe" }
       );
     } catch (err2: any) {
       execSync(
-        "ffmpeg -y -f concat -safe 0 -i " + JSON.stringify(concatListPath) + " -pix_fmt yuv420p " + JSON.stringify(path.join(outputDir, "video_only.mp4")),
+        "ffmpeg -y -f concat -safe 0 -i " + JSON.stringify(concatListPath) + " -c:v libx264 -crf 20 -pix_fmt yuv420p " + JSON.stringify(path.join(outputDir, "video_only.mp4")),
         { encoding: "utf-8", timeout: 300000, stdio: "pipe" }
       );
     }
@@ -2420,7 +2426,7 @@ export async function runPipeline(projectId: string): Promise<void> {
               execSync(
                 "ffmpeg -y -f lavfi -i color=c=" + bgColor + ":s=1280x720:d=" + scene.duration +
                 " -vf " + JSON.stringify(vfFilter) +
-                " -c:v libx264 -pix_fmt yuv420p -profile:v high -level 4.1 -movflags +faststart -t " + scene.duration +
+                " -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -profile:v high -level 4.1 -movflags +faststart -t " + scene.duration +
                 " " + JSON.stringify(clipPath),
                 { encoding: "utf-8", timeout: 60000, stdio: "pipe" }
               );
@@ -2429,14 +2435,14 @@ export async function runPipeline(projectId: string): Promise<void> {
               try {
                 execSync(
                   "ffmpeg -y -f lavfi -i color=c=" + bgColor + ":s=1280x720:d=" + scene.duration +
-                  " -c:v libx264 -pix_fmt yuv420p -profile:v high -level 4.1 -movflags +faststart -t " + scene.duration +
+                  " -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -profile:v high -level 4.1 -movflags +faststart -t " + scene.duration +
                   " " + JSON.stringify(clipPath),
                   { encoding: "utf-8", timeout: 60000, stdio: "pipe" }
                 );
               } catch (ffErr2: any) {
                 execSync(
                   "ffmpeg -y -f lavfi -i color=c=" + bgColor + ":s=1280x720:d=" + scene.duration +
-                  " -pix_fmt yuv420p -t " + scene.duration +
+                  " -c:v libx264 -crf 20 -pix_fmt yuv420p -t " + scene.duration +
                   " " + JSON.stringify(clipPath),
                   { encoding: "utf-8", timeout: 60000, stdio: "pipe" }
                 );
@@ -2662,7 +2668,7 @@ export async function runPipelineRetry(projectId: string, failedSceneIds: string
           const bgColor = "0x1e40af";
           execSync(
             "ffmpeg -y -f lavfi -i color=c=" + bgColor + ":s=1280x720:d=" + scene.duration +
-            " -c:v libx264 -pix_fmt yuv420p -t " + scene.duration + " " + JSON.stringify(clipPath),
+            " -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -profile:v high -level 4.1 -movflags +faststart -t " + scene.duration + " " + JSON.stringify(clipPath),
             { encoding: "utf-8", timeout: 60000, stdio: "pipe" }
           );
         }
