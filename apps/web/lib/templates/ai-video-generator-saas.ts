@@ -920,6 +920,24 @@ export default function SetupPage() {
                       {svc.username && <span style={{ marginLeft: 8, color: "#4ade80" }}>&#10003; {svc.username}</span>}
                     </div>
                   )}
+                  {svc.models && (
+                    <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 8, display: "grid", gap: 4 }}>
+                      {[
+                        { label: "Keyframe (image)", slug: svc.models.image, endpoint: svc.models.imageEndpoint },
+                        { label: "Video clip", slug: svc.models.video, endpoint: svc.models.videoEndpoint },
+                        { label: "Identity (InstantID)", slug: svc.models.identity, endpoint: svc.models.identityEndpoint },
+                      ].map((m: any) => (
+                        <div key={m.label} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ color: "var(--text)", fontWeight: 500, minWidth: 160 }}>{m.label}:</span>
+                          <a href={"https://replicate.com/" + m.slug} target="_blank" rel="noopener"
+                            style={{ fontFamily: "monospace", fontSize: 11, color: "var(--accent2)", textDecoration: "none", padding: "1px 6px", background: "var(--surface)", borderRadius: 4 }}>
+                            {m.slug}
+                          </a>
+                          <span style={{ fontSize: 10, color: "var(--text2)", opacity: 0.7 }}>&#8594; {m.endpoint}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {isBilling && (
                     <div style={{ padding: "12px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, fontSize: 13, marginBottom: 8 }}>
                       <div style={{ fontWeight: 600, color: "#f87171", marginBottom: 4 }}>&#128179; Billing Required</div>
@@ -1946,7 +1964,15 @@ export async function GET() {
       provider: replicateToken ? "replicate" : "none",
       envVar: "REPLICATE_API_TOKEN",
       helpUrl: "https://replicate.com/account/api-tokens",
-      description: "Generates keyframe images (" + imageModel + ") then video clips (" + videoModel + ") from scene descriptions",
+      description: "Generates keyframe images and video clips from scene descriptions",
+      models: {
+        image: imageModel,
+        video: videoModel,
+        identity: process.env.IDENTITY_MODEL || "zsxkib/instant-id",
+        imageEndpoint: "https://api.replicate.com/v1/models/" + imageModel + "/predictions",
+        videoEndpoint: "https://api.replicate.com/v1/models/" + videoModel + "/predictions",
+        identityEndpoint: "https://api.replicate.com/v1/models/" + (process.env.IDENTITY_MODEL || "zsxkib/instant-id") + "/predictions",
+      },
       error: replicateCheck?.billingStatus === "billing_required"
         ? "Insufficient credits. Add a payment method at https://replicate.com/account/billing"
         : replicateCheck?.billingStatus === "rate_limited"
@@ -2757,19 +2783,39 @@ async function replicateRun(model: string, input: Record<string, any>, token: st
 
 async function replicateRunInner(model: string, input: Record<string, any>, token: string, attempt = 0): Promise<any> {
   const MAX_RETRIES = 5;
-  const createRes = await fetch("https://api.replicate.com/v1/predictions", {
+
+  // Parse model string — supports "owner/name" and "owner/name:versionhash"
+  // Always use the model-based endpoint (/v1/models/owner/name/predictions) to avoid stale version hashes (422 errors)
+  const slug = model.split(":")[0]; // strip version hash if present
+  const parts = slug.split("/");
+  const useModelEndpoint = parts.length === 2 && parts[0] && parts[1];
+  const endpoint = useModelEndpoint
+    ? "https://api.replicate.com/v1/models/" + parts[0] + "/" + parts[1] + "/predictions"
+    : "https://api.replicate.com/v1/predictions";
+  const payload = useModelEndpoint ? { input } : { version: model, input };
+
+  console.log("[REPLICATE] POST " + endpoint + " model=" + slug + " inputKeys=[" + Object.keys(input).join(",") + "] attempt=" + attempt);
+
+  const createRes = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-    body: JSON.stringify({ version: model, input }),
+    body: JSON.stringify(payload),
   });
 
   if (createRes.status === 402) {
     const body = await createRes.text();
+    console.error("[REPLICATE] 402 billing error model=" + slug + " body=" + body.slice(0, 200));
     throw new ReplicateBillingError(
-      "Insufficient Replicate credits. Add a payment method or purchase credits at https://replicate.com/account/billing to continue. Model: " + model,
-      model,
+      "Insufficient Replicate credits. Add a payment method or purchase credits at https://replicate.com/account/billing to continue. Model: " + slug,
+      slug,
       "https://replicate.com/account/billing"
     );
+  }
+
+  if (createRes.status === 422) {
+    const body = await createRes.text();
+    console.error("[REPLICATE] 422 error model=" + slug + " endpoint=" + endpoint + " body=" + body.slice(0, 300));
+    throw new Error("Replicate 422: model=" + slug + " endpoint=" + endpoint + " detail=" + body.slice(0, 200));
   }
 
   if (createRes.status === 429) {
@@ -2783,14 +2829,15 @@ async function replicateRunInner(model: string, input: Record<string, any>, toke
     const retryAfterParsed = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 0;
     const retryAfter = Number.isFinite(retryAfterParsed) ? retryAfterParsed : 0;
     const backoff = Math.max(retryAfter, Math.pow(2, attempt + 1)) * 1000;
-    console.log("[VIDEO] Rate limited (429). retry_after=" + retryAfter + "s, backing off " + (backoff / 1000) + "s (attempt " + (attempt + 1) + "/" + MAX_RETRIES + ")");
+    console.log("[REPLICATE] 429 rate-limited model=" + slug + " retry_after=" + retryAfter + "s backoff=" + (backoff / 1000) + "s attempt=" + (attempt + 1) + "/" + MAX_RETRIES);
     await new Promise(r => setTimeout(r, backoff));
     return replicateRunInner(model, input, token, attempt + 1);
   }
 
   if (!createRes.ok) {
     const body = await createRes.text();
-    throw new Error("Replicate API error " + createRes.status + ": " + body.slice(0, 300));
+    console.error("[REPLICATE] " + createRes.status + " error model=" + slug + " endpoint=" + endpoint + " body=" + body.slice(0, 300));
+    throw new Error("Replicate API error " + createRes.status + " (model=" + slug + "): " + body.slice(0, 300));
   }
 
   let prediction = await createRes.json();
@@ -2877,7 +2924,7 @@ export async function generateKeyframeImage(
   return url;
 }
 
-const IDENTITY_MODEL = "zsxkib/instant-id:d90ddb61aa7bd82fcbe7e5fafc3f8e34ee753cfead3c1a30d855616e35af3f0e";
+const IDENTITY_MODEL = process.env.IDENTITY_MODEL || "zsxkib/instant-id"; // use slug only — version resolved at runtime by Replicate
 
 export interface IdentityKeyframeResult {
   url: string;
@@ -2908,7 +2955,7 @@ export async function generateIdentityKeyframe(
 
   const negativePrompt = "cartoon, anime, illustration, painting, drawing, deformed, ugly, blurry, low quality, watermark, text, logo";
 
-  console.log("[IDENTITY-KEYFRAME] Generating identity-preserving keyframe for character=" + characterName + " model=" + IDENTITY_MODEL.split(":")[0] + " prompt=" + imagePrompt.slice(0, 100) + "...");
+  console.log("[IDENTITY-KEYFRAME] Generating identity-preserving keyframe character=" + characterName + " model=" + IDENTITY_MODEL + " endpoint=/v1/models/" + IDENTITY_MODEL.split(":")[0] + "/predictions prompt=" + imagePrompt.slice(0, 100) + "...");
 
   const input: Record<string, any> = {
     image: faceImageUrl,
