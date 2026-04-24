@@ -2031,7 +2031,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       include: { scenes: { orderBy: { index: "asc" }, include: { audioTracks: true } }, characterRefs: { include: { images: true } } },
     });
     return NextResponse.json(updated);
-  } catch (err) {
+  } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
