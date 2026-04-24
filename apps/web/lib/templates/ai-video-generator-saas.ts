@@ -924,10 +924,22 @@ export default function SetupPage() {
                     <div style={{ padding: "12px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, fontSize: 13, marginBottom: 8 }}>
                       <div style={{ fontWeight: 600, color: "#f87171", marginBottom: 4 }}>&#128179; Billing Required</div>
                       <div style={{ color: "var(--text2)", marginBottom: 8 }}>{svc.error || "Insufficient credits to run predictions"}</div>
-                      <a href={svc.billingUrl || "https://replicate.com/account/billing"} target="_blank" rel="noopener"
-                        style={{ display: "inline-block", padding: "8px 16px", background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, color: "#f87171", fontWeight: 600, textDecoration: "none", fontSize: 13 }}>
-                        &#8594; Add Credits on Replicate
-                      </a>
+                      {svc.key === "scriptParser" && svc.billingUrl?.includes("anthropic") ? (
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                          <a href={svc.billingUrl} target="_blank" rel="noopener"
+                            style={{ display: "inline-block", padding: "8px 16px", background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, color: "#f87171", fontWeight: 600, textDecoration: "none", fontSize: 13 }}>
+                            &#8594; Add Credits on Anthropic
+                          </a>
+                          <div style={{ fontSize: 12, color: "var(--text2)", padding: "8px 0", lineHeight: 1.5 }}>
+                            Or add <code style={{ fontFamily: "monospace", background: "var(--surface)", padding: "1px 5px", borderRadius: 3 }}>OPENAI_API_KEY</code> as a fallback — parsing will automatically use OpenAI when Anthropic credits run out.
+                          </div>
+                        </div>
+                      ) : (
+                        <a href={svc.billingUrl || "https://replicate.com/account/billing"} target="_blank" rel="noopener"
+                          style={{ display: "inline-block", padding: "8px 16px", background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, color: "#f87171", fontWeight: 600, textDecoration: "none", fontSize: 13 }}>
+                          &#8594; Add Credits on Replicate
+                        </a>
+                      )}
                     </div>
                   )}
                   {isRateLimited && (
@@ -1824,6 +1836,28 @@ async function checkOpenAIKey(key: string): Promise<{ valid: boolean; error?: st
   }
 }
 
+async function checkAnthropicKey(key: string): Promise<{ valid: boolean; billingStatus?: string; error?: string }> {
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: "claude-haiku-4-20250514", max_tokens: 10, messages: [{ role: "user", content: "hi" }] }),
+    });
+    if (res.ok) return { valid: true, billingStatus: "active" };
+    const body = await res.text();
+    const lower = body.toLowerCase();
+    if (res.status === 401) return { valid: false, error: "Key is invalid or expired (401)" };
+    if (res.status === 400 || res.status === 402 || res.status === 403) {
+      if (lower.includes("credit") || lower.includes("billing") || lower.includes("balance") || lower.includes("payment") || lower.includes("insufficient")) {
+        return { valid: true, billingStatus: "billing_required", error: "Credit balance too low — add credits at https://console.anthropic.com/settings/billing" };
+      }
+    }
+    return { valid: false, error: "Anthropic API returned " + res.status + ": " + body.slice(0, 120) };
+  } catch (err: any) {
+    return { valid: false, error: "Network error: " + (err.message || "unknown") };
+  }
+}
+
 export async function GET() {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
@@ -1835,23 +1869,20 @@ export async function GET() {
 
   let replicateCheck: { valid: boolean; error?: string; username?: string; billingStatus?: string } | null = null;
   let openaiCheck: { valid: boolean; error?: string } | null = null;
+  let anthropicCheck: { valid: boolean; billingStatus?: string; error?: string } | null = null;
 
-  if (replicateToken) {
-    replicateCheck = await checkReplicateToken(replicateToken);
-    console.log("[AI-STATUS] Replicate token check: valid=" + replicateCheck.valid +
-      (replicateCheck.username ? " user=" + replicateCheck.username : "") +
-      (replicateCheck.error ? " error=" + replicateCheck.error : "") +
-      " tokenLength=" + replicateToken.length +
-      " baseUrl=https://api.replicate.com/v1");
-  }
+  const checks = await Promise.allSettled([
+    replicateToken ? checkReplicateToken(replicateToken) : Promise.resolve(null),
+    openaiKey ? checkOpenAIKey(openaiKey) : Promise.resolve(null),
+    anthropicKey ? checkAnthropicKey(anthropicKey) : Promise.resolve(null),
+  ]);
+  replicateCheck = checks[0].status === "fulfilled" ? checks[0].value : null;
+  openaiCheck = checks[1].status === "fulfilled" ? checks[1].value : null;
+  anthropicCheck = checks[2].status === "fulfilled" ? checks[2].value : null;
 
-  if (openaiKey) {
-    openaiCheck = await checkOpenAIKey(openaiKey);
-    console.log("[AI-STATUS] OpenAI key check: valid=" + openaiCheck.valid +
-      (openaiCheck.error ? " error=" + openaiCheck.error : "") +
-      " keyLength=" + openaiKey.length +
-      " baseUrl=https://api.openai.com/v1");
-  }
+  if (replicateCheck) console.log("[AI-STATUS] Replicate: valid=" + replicateCheck.valid + (replicateCheck.username ? " user=" + replicateCheck.username : "") + (replicateCheck.billingStatus ? " billing=" + replicateCheck.billingStatus : ""));
+  if (openaiCheck) console.log("[AI-STATUS] OpenAI: valid=" + openaiCheck.valid + (openaiCheck.error ? " error=" + openaiCheck.error : ""));
+  if (anthropicCheck) console.log("[AI-STATUS] Anthropic: valid=" + anthropicCheck.valid + " billing=" + (anthropicCheck.billingStatus || "unknown") + (anthropicCheck.error ? " error=" + anthropicCheck.error : ""));
 
   function tokenStatus(present: boolean, check: { valid: boolean; error?: string } | null): string {
     if (!present) return "missing";
@@ -1862,19 +1893,49 @@ export async function GET() {
   const replicateStatus = tokenStatus(!!replicateToken, replicateCheck);
   const scriptParserPresent = !!(anthropicKey || openaiKey);
   const openaiStatus = tokenStatus(!!openaiKey, openaiCheck);
-  const scriptStatus = anthropicKey ? "configured" : openaiStatus;
+
+  // Script parser status: billing_required if Anthropic key exists but is billing-limited and no OpenAI fallback
+  const anthropicBillingLimited = !!(anthropicCheck?.billingStatus === "billing_required");
+  const hasFallback = !!(openaiKey && openaiCheck?.valid);
+  let scriptParserStatus: string;
+  let scriptParserProvider: string;
+  let scriptParserError: string | undefined;
+  let scriptParserBillingUrl: string | undefined;
+
+  if (!scriptParserPresent) {
+    scriptParserStatus = "missing";
+    scriptParserProvider = "none";
+  } else if (anthropicKey && !anthropicBillingLimited) {
+    scriptParserStatus = anthropicCheck ? (anthropicCheck.valid ? "valid" : "invalid") : "configured";
+    scriptParserProvider = "anthropic";
+    scriptParserError = anthropicCheck?.valid === false ? anthropicCheck.error : undefined;
+  } else if (anthropicBillingLimited && hasFallback) {
+    scriptParserStatus = "valid";
+    scriptParserProvider = "openai (anthropic billing fallback)";
+    scriptParserError = "Anthropic credits exhausted — automatically using OpenAI (gpt-4o-mini) as fallback";
+  } else if (anthropicBillingLimited && !hasFallback) {
+    scriptParserStatus = "billing_required";
+    scriptParserProvider = "anthropic";
+    scriptParserError = anthropicCheck?.error || "Anthropic credit balance too low";
+    scriptParserBillingUrl = "https://console.anthropic.com/settings/billing";
+  } else {
+    scriptParserStatus = openaiStatus;
+    scriptParserProvider = openaiKey ? "openai" : "none";
+    scriptParserError = openaiCheck?.error;
+  }
 
   const services = [
     {
       name: "Script Parser",
       key: "scriptParser",
-      status: scriptParserPresent ? (anthropicKey ? "configured" : openaiStatus) : "missing",
-      provider: anthropicKey ? "anthropic" : (openaiKey ? "openai" : "none"),
+      status: scriptParserStatus,
+      provider: scriptParserProvider,
       envVar: "ANTHROPIC_API_KEY or OPENAI_API_KEY",
       helpUrl: "https://console.anthropic.com/settings/keys",
       description: "Parses scripts into structured scenes with timeline events",
-      error: !anthropicKey && openaiCheck?.error ? openaiCheck.error : undefined,
+      error: scriptParserError,
       baseUrl: anthropicKey ? "https://api.anthropic.com/v1" : (openaiKey ? "https://api.openai.com/v1" : undefined),
+      billingUrl: scriptParserBillingUrl,
     },
     {
       name: "Video Generator",
@@ -2505,6 +2566,14 @@ For each scene, produce a JSON object with:
 
 Return ONLY a valid JSON array. No markdown, no explanation.\`;
 
+function isAnthropicBillingError(status: number, body: string): boolean {
+  if (status === 400 || status === 402 || status === 403) {
+    const lower = body.toLowerCase();
+    return lower.includes("credit") || lower.includes("billing") || lower.includes("balance") || lower.includes("payment") || lower.includes("insufficient");
+  }
+  return false;
+}
+
 export async function parseScript(script: string): Promise<ParsedScene[]> {
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
@@ -2525,6 +2594,7 @@ export async function parseScript(script: string): Promise<ParsedScene[]> {
 
   const userPrompt = "Parse this script into scenes with timeline events:\\n\\n" + script;
   let responseText = "";
+  let usedProvider = "none";
 
   if (anthropicKey) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -2541,10 +2611,27 @@ export async function parseScript(script: string): Promise<ParsedScene[]> {
         messages: [{ role: "user", content: userPrompt }],
       }),
     });
-    if (!res.ok) throw new Error("Anthropic API error: " + res.status + " " + (await res.text()).slice(0, 200));
-    const data = await res.json();
-    responseText = data.content?.[0]?.text || "";
-  } else if (openaiKey) {
+    if (!res.ok) {
+      const errBody = await res.text();
+      if (isAnthropicBillingError(res.status, errBody)) {
+        console.warn("[PARSER] Anthropic billing/credit error (status=" + res.status + ") — falling back to OpenAI. Error: " + errBody.slice(0, 200));
+        if (!openaiKey) {
+          throw new Error("[BILLING] Anthropic credit balance exhausted and no OpenAI fallback key is configured.\\n" +
+            "Add OPENAI_API_KEY as a fallback, or top up Anthropic credits at https://console.anthropic.com/settings/billing");
+        }
+        // fall through to OpenAI below
+      } else {
+        throw new Error("Anthropic API error: " + res.status + " " + errBody.slice(0, 200));
+      }
+    } else {
+      const data = await res.json();
+      responseText = data.content?.[0]?.text || "";
+      usedProvider = "anthropic";
+    }
+  }
+
+  if (!responseText && openaiKey) {
+    console.log("[PARSER] Using OpenAI (gpt-4o-mini) for script parsing" + (anthropicKey ? " (Anthropic fallback)" : ""));
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + openaiKey },
@@ -2554,10 +2641,13 @@ export async function parseScript(script: string): Promise<ParsedScene[]> {
         max_tokens: 8192,
       }),
     });
-    if (!res.ok) throw new Error("OpenAI API error: " + res.status);
+    if (!res.ok) throw new Error("OpenAI API error: " + res.status + " " + (await res.text()).slice(0, 200));
     const data = await res.json();
     responseText = data.choices?.[0]?.message?.content || "";
+    usedProvider = "openai";
   }
+
+  console.log("[PARSER] Script parsed successfully via " + usedProvider);
 
   const jsonMatch = responseText.match(/\\[\\s*\\{[\\s\\S]*\\}\\s*\\]/);
   if (!jsonMatch) throw new Error("Failed to parse AI response as JSON scene array. Response: " + responseText.slice(0, 300));
