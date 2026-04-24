@@ -1137,6 +1137,8 @@ export default function ProjectPage() {
   const [setupError, setSetupError] = useState("");
   const [showScript, setShowScript] = useState(false);
   const [previewingScene, setPreviewingScene] = useState<string | null>(null);
+  const [togglingIdentity, setTogglingIdentity] = useState(false);
+  const [showIdentityBlocker, setShowIdentityBlocker] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/projects/" + id);
@@ -1162,6 +1164,29 @@ export default function ProjectPage() {
       }
       await load();
     } finally { setActionLoading(""); }
+  }
+
+  async function toggleStrictIdentity(enable: boolean) {
+    setTogglingIdentity(true);
+    try {
+      const res = await fetch("/api/projects/" + id, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strictIdentity: enable }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Failed" }));
+        alert("Error: " + (data.error || "Could not update identity mode"));
+      } else {
+        setShowIdentityBlocker(false);
+        await load();
+      }
+    } finally { setTogglingIdentity(false); }
+  }
+
+  async function enableIdentityAndGenerate() {
+    await toggleStrictIdentity(true);
+    await doAction("generate");
   }
 
   if (loading) return (
@@ -1190,6 +1215,8 @@ export default function ProjectPage() {
   const hasBillingError = project.scenes.some(s => s.error?.startsWith("[BILLING]"));
   const hasRateLimitError = project.scenes.some(s => s.error?.startsWith("[RATE_LIMIT]"));
   const hasRetryableFailures = failed > 0 && !isActive;
+  const refsWithImages = (project.characterRefs || []).filter((c: any) => c.images && c.images.length > 0);
+  const hasRefsWithoutIdentity = refsWithImages.length > 0 && !project.strictIdentity;
 
   return (
     <div style={{ maxWidth: 1000, margin: "0 auto", padding: "32px 24px" }} className="fade-in">
@@ -1214,7 +1241,12 @@ export default function ProjectPage() {
             </button>
           )}
           {project.status === "parsed" && (
-            <button data-testid="button-generate" onClick={() => doAction("generate")} disabled={!!actionLoading} className="btn-success">
+            <button data-testid="button-generate"
+              onClick={() => {
+                if (hasRefsWithoutIdentity) { setShowIdentityBlocker(true); return; }
+                doAction("generate");
+              }}
+              disabled={!!actionLoading} className="btn-success">
               {actionLoading === "generate" ? "Starting..." : "&#9654; Generate Video"}
             </button>
           )}
@@ -1295,6 +1327,36 @@ export default function ProjectPage() {
         </div>
       )}
 
+      {showIdentityBlocker && (
+        <div data-testid="modal-identity-blocker" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div className="glass-card" style={{ padding: 32, maxWidth: 480, width: "100%", borderColor: "rgba(245,158,11,0.5)", background: "var(--bg)" }}>
+            <div style={{ fontSize: 40, marginBottom: 12, textAlign: "center" }}>&#9888;&#65039;</div>
+            <h2 style={{ fontWeight: 800, fontSize: 20, marginBottom: 12, textAlign: "center" }}>Face References Ignored</h2>
+            <p style={{ fontSize: 14, color: "var(--text2)", lineHeight: 1.6, marginBottom: 20, textAlign: "center" }}>
+              You uploaded face reference photos for <strong style={{ color: "var(--text)" }}>{refsWithImages.map((c: any) => c.name).join(", ")}</strong>, but <strong style={{ color: "#fbbf24" }}>Strict Identity Mode is OFF</strong>. The generated video will <em>not</em> preserve these faces.
+            </p>
+            <div style={{ display: "grid", gap: 10 }}>
+              <button data-testid="button-enable-identity-generate"
+                disabled={togglingIdentity || !!actionLoading}
+                onClick={enableIdentityAndGenerate}
+                className="btn-success" style={{ padding: "12px 20px", fontSize: 14, fontWeight: 700 }}>
+                {togglingIdentity || actionLoading === "generate" ? "Enabling..." : "&#9989; Enable Strict Identity + Generate"}
+              </button>
+              <button data-testid="button-generate-without-identity"
+                disabled={!!actionLoading}
+                onClick={() => { setShowIdentityBlocker(false); doAction("generate"); }}
+                style={{ padding: "12px 20px", fontSize: 13, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, cursor: "pointer", color: "var(--text2)", fontWeight: 500 }}>
+                Generate Without Face Matching (refs will be ignored)
+              </button>
+              <button onClick={() => setShowIdentityBlocker(false)}
+                style={{ padding: "10px 20px", fontSize: 13, background: "transparent", border: "none", cursor: "pointer", color: "var(--text2)" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {project.status === "complete" && project.outputUrl && (
         <div className="glass-card" style={{ padding: 0, marginBottom: 28, overflow: "hidden" }}>
           <div style={{ background: "#000", borderRadius: "16px 16px 0 0" }}>
@@ -1367,13 +1429,25 @@ export default function ProjectPage() {
 
       {project.characterRefs && project.characterRefs.length > 0 && (
         <div className="glass-card" style={{ padding: 20, marginBottom: 24 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-            <span style={{ fontSize: 15, fontWeight: 700 }}>Character References</span>
-            {project.strictIdentity && (
-              <span data-testid="badge-strict-identity" style={{ fontSize: 10, fontWeight: 700, background: "rgba(99,102,241,0.15)", color: "var(--accent2)", padding: "2px 8px", borderRadius: 6, letterSpacing: "0.05em" }}>
-                STRICT IDENTITY
-              </span>
-            )}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, justifyContent: "space-between", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>Character References</span>
+              {project.strictIdentity ? (
+                <span data-testid="badge-strict-identity" style={{ fontSize: 10, fontWeight: 700, background: "rgba(99,102,241,0.15)", color: "var(--accent2)", padding: "2px 8px", borderRadius: 6, letterSpacing: "0.05em" }}>
+                  STRICT IDENTITY ON
+                </span>
+              ) : (
+                <span data-testid="badge-strict-identity-off" style={{ fontSize: 10, fontWeight: 700, background: "rgba(245,158,11,0.12)", color: "#fbbf24", padding: "2px 8px", borderRadius: 6, letterSpacing: "0.05em" }}>
+                  IDENTITY OFF
+                </span>
+              )}
+            </div>
+            <button data-testid="button-toggle-identity"
+              disabled={togglingIdentity}
+              onClick={() => toggleStrictIdentity(!project.strictIdentity)}
+              style={{ fontSize: 12, padding: "6px 14px", background: project.strictIdentity ? "rgba(239,68,68,0.1)" : "rgba(99,102,241,0.15)", border: "1px solid " + (project.strictIdentity ? "rgba(239,68,68,0.3)" : "rgba(99,102,241,0.3)"), borderRadius: 8, cursor: "pointer", color: project.strictIdentity ? "#f87171" : "var(--accent2)", fontWeight: 600 }}>
+              {togglingIdentity ? "Updating..." : project.strictIdentity ? "&#9940; Disable Identity Mode" : "&#9989; Enable Strict Identity Mode"}
+            </button>
           </div>
           <div style={{ display: "grid", gap: 10 }}>
             {project.characterRefs.map((char: any) => (
@@ -1401,8 +1475,20 @@ export default function ProjectPage() {
             ))}
           </div>
           {!project.strictIdentity && project.characterRefs.some((c: any) => c.images && c.images.length > 0) && (
-            <div style={{ marginTop: 10, fontSize: 11, color: "var(--text2)", fontStyle: "italic" }}>
-              Tip: Enable &quot;Strict Identity Mode&quot; when creating a project to use face-preserving AI for character consistency.
+            <div data-testid="banner-identity-warning" style={{ marginTop: 14, padding: "12px 16px", background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 10, display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <span style={{ fontSize: 18, flexShrink: 0 }}>&#9888;&#65039;</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, color: "#fbbf24", fontSize: 13, marginBottom: 4 }}>Face references uploaded but Strict Identity Mode is OFF</div>
+                <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.5, marginBottom: 10 }}>
+                  Your uploaded photos will be ignored during generation. Enable Strict Identity Mode to use InstantID and preserve the exact faces from your reference images.
+                </div>
+                <button data-testid="button-enable-identity-inline"
+                  disabled={togglingIdentity}
+                  onClick={() => toggleStrictIdentity(true)}
+                  style={{ fontSize: 12, padding: "7px 16px", background: "rgba(99,102,241,0.2)", border: "1px solid rgba(99,102,241,0.4)", borderRadius: 8, cursor: "pointer", color: "var(--accent2)", fontWeight: 700 }}>
+                  {togglingIdentity ? "Enabling..." : "&#9989; Enable Strict Identity Mode"}
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1916,6 +2002,38 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   });
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json(project);
+}
+
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  try {
+    const body = await req.json();
+    const { strictIdentity } = body;
+    if (typeof strictIdentity !== "boolean") {
+      return NextResponse.json({ error: "strictIdentity must be a boolean" }, { status: 400 });
+    }
+    const project = await prisma.project.findUnique({ where: { id } });
+    if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    await prisma.project.update({ where: { id }, data: { strictIdentity } });
+    if (strictIdentity) {
+      const scenes = await prisma.scene.findMany({ where: { projectId: id } });
+      for (const scene of scenes) {
+        if (!scene.firstFrameUrl) {
+          await prisma.scene.update({ where: { id: scene.id }, data: { keyframeUrl: null, identityDebugJson: null } });
+        }
+      }
+      console.log("[IDENTITY] strictIdentity=true for project", id, "- keyframes reset (scenes without first-frame override)");
+    } else {
+      console.log("[IDENTITY] strictIdentity=false for project", id);
+    }
+    const updated = await prisma.project.findUnique({
+      where: { id },
+      include: { scenes: { orderBy: { index: "asc" }, include: { audioTracks: true } }, characterRefs: { include: { images: true } } },
+    });
+    return NextResponse.json(updated);
+  } catch (err) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
 }
 `,
     },
