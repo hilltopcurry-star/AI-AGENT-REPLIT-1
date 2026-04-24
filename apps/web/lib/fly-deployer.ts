@@ -10,6 +10,38 @@ async function logToJob(jobId: string | null, level: string, message: string) {
   await prisma.jobLog.create({ data: { jobId, level, message } });
 }
 
+async function resolveDeployCommitSha(workspacePath: string, jobId: string | null): Promise<string> {
+  // Priority order:
+  // 1. Explicit env override (worker can pass DEPLOY_COMMIT_SHA when scaffolding from a known commit)
+  // 2. .deploy-sha file in the workspace (written by worker before deploy)
+  // 3. git rev-parse from the host repo (this codebase)
+  const fromEnv = process.env.DEPLOY_COMMIT_SHA;
+  if (fromEnv && fromEnv.length >= 7) {
+    await logToJob(jobId, "INFO", `[DEPLOY] DEPLOY_COMMIT_SHA from env: ${fromEnv}`);
+    return fromEnv;
+  }
+  try {
+    const shaFile = path.join(workspacePath, ".deploy-sha");
+    if (fs.existsSync(shaFile)) {
+      const sha = fs.readFileSync(shaFile, "utf-8").trim();
+      if (sha.length >= 7) {
+        await logToJob(jobId, "INFO", `[DEPLOY] DEPLOY_COMMIT_SHA from .deploy-sha file: ${sha}`);
+        return sha;
+      }
+    }
+  } catch {}
+  try {
+    const sha = execSync("git rev-parse HEAD", { encoding: "utf-8", timeout: 5000 }).trim();
+    if (sha.length >= 7) {
+      await logToJob(jobId, "INFO", `[DEPLOY] DEPLOY_COMMIT_SHA from git rev-parse HEAD: ${sha}`);
+      return sha;
+    }
+  } catch {}
+  const fallback = "deploy-" + Date.now().toString(36);
+  await logToJob(jobId, "WARN", `[DEPLOY] Could not resolve commit SHA — falling back to ${fallback}`);
+  return fallback;
+}
+
 function generateAppName(projectId: string): string {
   const short = projectId.replace(/[^a-z0-9]/gi, "").slice(0, 16).toLowerCase();
   const suffix = Date.now().toString(36).slice(-4);
@@ -473,6 +505,10 @@ primary_region = "${region}"
   memory = "512mb"
   cpu_kind = "shared"
   cpus = 1
+
+[[mounts]]
+  source = "data"
+  destination = "/data"
 `;
       fs.writeFileSync(path.join(workspacePath, "fly.toml"), flyToml, "utf-8");
       return flyToml;
@@ -492,6 +528,15 @@ primary_region = "${region}"
         await logToJob(jobId, "INFO", `[DEPLOY] fly secrets set: ${key} present=false (not in worker env)`);
       }
     }
+
+    // Always inject the actual commit SHA + timestamp + DB path for this deploy.
+    // /api/debug commitSha is a production truth source — it MUST match the running build.
+    const deployCommitSha = await resolveDeployCommitSha(workspacePath, jobId);
+    const deployTimestamp = new Date().toISOString();
+    secretsToSet.DEPLOY_COMMIT_SHA = deployCommitSha;
+    secretsToSet.DEPLOY_TIMESTAMP = deployTimestamp;
+    secretsToSet.DATABASE_URL = "file:/data/db.sqlite";
+    await logToJob(jobId, "INFO", `[DEPLOY] Injecting build identity: DEPLOY_COMMIT_SHA=${deployCommitSha} DEPLOY_TIMESTAMP=${deployTimestamp} DATABASE_URL=file:/data/db.sqlite`);
     if (Object.keys(secretsToSet).length > 0) {
       const secretArgs = Object.entries(secretsToSet).map(([k, v]) => `${k}=${v}`);
       await logToJob(jobId, "INFO", `[DEPLOY] Setting ${Object.keys(secretsToSet).length} fly secret(s) with --stage: ${Object.keys(secretsToSet).join(", ")}`);
@@ -619,12 +664,14 @@ export async function createDockerContext(
       ].join("\n")
     : "";
 
-  const sqliteEnvLine = isSqlite ? 'ENV DATABASE_URL="file:./prisma/dev.db"' : "";
+  // DATABASE_URL is now injected as a fly secret (file:/data/db.sqlite for sqlite — uses persistent volume mount)
+  // We set a build-time fallback in the Dockerfile so `next build` doesn't fail when DATABASE_URL is missing.
+  const sqliteEnvLine = isSqlite ? 'ENV DATABASE_URL="file:/data/db.sqlite"' : "";
 
   const startCmd = hasPrisma
     ? isSqlite
-      ? `CMD ["sh", "-c", "node node_modules/prisma/build/index.js db push --accept-data-loss 2>/dev/null || true; node server.js"]`
-      : `CMD ["sh", "-c", "node node_modules/prisma/build/index.js migrate deploy 2>/dev/null || node node_modules/prisma/build/index.js db push --accept-data-loss 2>/dev/null || true; node server.js"]`
+      ? `CMD ["sh", "-c", "echo '[BOOT] DATABASE_URL='\\"$DATABASE_URL\\" && mkdir -p /data && node node_modules/prisma/build/index.js db push --accept-data-loss --skip-generate || (echo '[BOOT] FATAL: prisma db push failed' && exit 1); echo '[BOOT] DB ready, starting server' && node server.js"]`
+      : `CMD ["sh", "-c", "echo '[BOOT] DATABASE_URL='\\"$DATABASE_URL\\" && (node node_modules/prisma/build/index.js migrate deploy || node node_modules/prisma/build/index.js db push --accept-data-loss --skip-generate) || (echo '[BOOT] FATAL: prisma migrate/push failed' && exit 1); echo '[BOOT] DB ready, starting server' && node server.js"]`
     : `CMD ["node", "server.js"]`;
 
   let extraApkPackages = "";
@@ -642,8 +689,8 @@ export async function createDockerContext(
   const dockerfile = `FROM node:20-alpine AS builder
 WORKDIR /app
 RUN apk add --no-cache openssl libc6-compat ca-certificates && update-ca-certificates
-COPY package.json package-lock.json* ./
-RUN npm ci --no-audit --no-fund
+COPY package.json ./
+RUN npm install --no-audit --no-fund
 COPY . .
 ENV NODE_OPTIONS="--max-old-space-size=2048"
 ENV NEXT_PRIVATE_WORKER_THREADS=0

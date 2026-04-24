@@ -180,6 +180,19 @@ module.exports = nextConfig;
     },
     {
       path: ".env",
+      content: `# DATABASE_URL is intentionally NOT set here. It MUST be provided by the runtime environment
+# (Dockerfile ENV or fly secret). Setting it here would override the deployment env at runtime.
+# Local dev: copy .env.example to .env.local and set DATABASE_URL=file:./prisma/dev.db
+ANTHROPIC_API_KEY=""
+OPENAI_API_KEY=""
+REPLICATE_API_TOKEN=""
+VIDEO_MODEL="minimax/video-01-live"
+VIDEO_STYLE="photorealistic cinematic"
+DEMO_MODE=""
+`,
+    },
+    {
+      path: ".env.example",
       content: `DATABASE_URL="file:./prisma/dev.db"
 ANTHROPIC_API_KEY=""
 OPENAI_API_KEY=""
